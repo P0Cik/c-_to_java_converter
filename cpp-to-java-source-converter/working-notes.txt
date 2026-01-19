@@ -1,0 +1,241 @@
+TEMPLATES:
+
+template <typename Type>
+Type max(Type a, Type b) {
+    return a > b ? a : b;
+}
+
+becomes:
+
+Type <Type> max(Type a, Type b)
+{
+    return (isOpOverride(a, b) ? opOverride(a, b, "opGreaterThan") : getVal(a) > getVal(b)) ? a : b;
+}
+
+Another example:
+
+void <Type> plusAssign(Type a, Type b)
+{
+	// a += b;
+	(isOpOverride(a, b) ? opOverride(a, b, "opPlusAssign") : setVal(a, getVal(a) + getVal(b)));
+}
+
+Another example:
+
+void <Type> plusAssign(Type a)
+{
+	// a++;
+	(isOpOverride(a) ? opOverride(a, "++") : setVal(a, getVal(a) + 1));
+}
+
+All variables are to be considered objects except bitfields.
+
+The interface for pointer to objects follows:
+public interface IPtrObject<T>
+{
+	public IPtrObject<T> ptrCopy();
+	public IPtrObject<T> ptrOffset(int cnt);
+	public IPtrObject<T> ptrAdjust(int cnt);
+	public IPtrObject<T> ptrPostInc();
+	public IPtrObject<T> ptrPostDec();
+	public IPtrObject<IPtrObject<T>> ptrAddressOf();
+	public int ptrCompare();
+	public T get();
+	public T set(T value);
+	public T[] deep();
+}
+
+The concrete implementations for IPtrObject are (with static creation methods):
+PtrObject
+  valueOf
+
+PtrObjectMulti
+  create
+
+PtrObjectNull
+  instance
+
+Number and boolean objects to have following interface. Note that this means that IInteger describes
+a number as well as a pointer to a number.
+public interface IInteger
+{
+	public IInteger ptrCopy();
+	public IInteger ptrOffset(int cnt);
+	public IInteger ptrAdjust(int cnt);
+	public IInteger ptrPostInc();
+	public IInteger ptrPostDec();
+	public IPtrObject<IInteger> ptrAddressOf();
+	public IInteger addressOf();
+	public int ptrCompare();
+	public int get();
+	public int set(int value);
+	public int postInc();
+	public int postDec();
+	public int[] deep();
+}
+
+The concrete implementations for IInteger are (with static creation methods):
+
+MInteger
+  valueOf
+
+MIntegerMulti
+  create
+
+All generated objects to implement the following interface:
+public interface CppType<T>
+{
+	void destruct();
+	T copy();
+	T opAssign(T right);
+}
+
+Concrete implementations also to implement
+default constructor
+
+
+#### Number operations ####
+All operations return a raw number other than addressof,
+create, func arg and return.
+
+-> n id        i.get()
+=> MODEL: MIdentityExpressionNumber
+
+-> n postinc   i.postInc().get()
+=> MODEL: MPostfixExpressionNumberInc
+
+-> n postdec   i.postDec().get()
+=> MODEL: MPostfixExpressionNumberDec
+
+-> n preinc    i.set(i.get() + 1)
+=> MODEL: MPrefixExpressionNumberInc
+
+-> n predec    i.set(i.get() - 1)
+=> MODEL: MPrefixExpressionNumberDec
+
+-> n infix     i.get() + i.get()
+=> MODEL: MInfixExpressionPlain
+
+-> n assign    i.set(j.get())
+=> MODEL: MInfixAssignmentWithNumberOnLeft
+
+-> n compound  i.set(i.get() + 2)
+=> MODEL: MCompoundWithNumberOnLeft
+
+-> n addressof i.addressOf()
+=> MODEL: MAddressOfExpression
+
+-> n unary     -i.get()
+=> MODEL: MPrefixExpressionPlain
+
+-> n create    MInteger i = MInteger.valueOf(2)
+=> MODEL: MValueOfExpressionNumber
+
+-> n func arg  func(MInteger.valueOf(i.get()))
+=> MODEL: MValueOfExpressionNumber
+
+-> n return    return MInteger.valueOf(i.get())
+=> MODEL: MValueOfExpressionNumber
+
+
+
+#### Pointer operations ####
+All operations return a pointer other than star.
+
+-> p id        p.ptrCopy()
+=> MODEL: MIdentityExpressionPtr
+
+-> p fieldref  obj.p.ptrCopy()
+=> MODEL: MFieldReferenceExpressionPtr
+
+-> p postinc   p.ptrPostInc()
+=> MODEL: MPostfixExpressionPointerInc
+
+-> p postdec   p.ptrPostDec()
+=> MODEL: MPostfixExpressionPointerDec
+
+-> p preinc    p.ptrAdjust(1)
+=> MODEL: MPrefixExpressionPointerInc
+
+-> p predec    p.ptrAdjust(-1)
+=> MODEL: MPrefixExpressionPointerDec
+
+-> p infix     p.ptrOffset(3) (p + 3)
+=> MODEL: MInfixExpressionWithPtrOnLeft
+
+-> p infix     p.ptrOffset(5) (5 + p)
+=> MODEL: MInfixExpressionWithPtrOnRight
+
+-> p assign    p = j.ptrCopy()
+=> MODEL: MInfixAssignmentWithPtrOnLeft
+
+-> p compound  ptr.ptrAdjust(-4) (p -= 4)
+=> MODEL: MCompoundWithPtrOnLeft
+
+-> p deref left assign  p.set(7)
+=> MODEL: MInfixAssignmentWithDerefOnLeft
+
+-> p deref left compound p.set(p.get() + 2) ((*p) += 2)
+=> MODEL: MCompoundWithDerefOnLeft
+
+-> p deref postfix p.ptrPostInc().postInc() ((*(p++))++)
+=> MODEL: MPostfixWithDeref
+
+-> p deref prefix p.ptrAdjust(-1).postInc() ((*(--p))++)
+=> MODEL: MPrefixWithDeref
+
+-> p addressof ptr.ptrAddressOf()
+=> MODEL: MAddressOfExpressionPtr
+
+-> p star      ptr.get()
+=> MODEL: MPrefixExpressionPointerStar
+
+-> p create null MInteger p = PTR.newNull()
+=> MODEL: MPtrCreateNull
+
+-> p func arg func(p.ptrCopy())
+=> MODEL: MPtrCopy
+
+-> p return   return p.ptrCopy()
+=> MODEL: MPtrCopy
+
+
+
+#### Array operations ####
+-> p array acc p.ptrOffset(2).get()
+=> MODEL: MArrayExpressionPtr
+
+-> p array acc address of p.ptrOffset(2).addressOf()
+=> MODEL: MAddressOfExpressionArrayItem
+
+-> p array create MIntegerMulti.create(2)
+=> MODEL: MNewArrayExpression
+
+
+#### Bitfield operations ####
+All operations return a raw number.
+
+-> b id        obj.get__b()
+=> MODEL: MIdentityExpressionBitfield
+
+-> b postinc   obj.postInc__b()
+=> MODEL: MPostfixExpressionBitfieldInc
+
+-> b postdec   obj.postDec__b()
+=> MODEL: MPostfixExpressionBitfieldDec
+
+-> b preinc    obj.set__b(obj.get__b() + 1)
+=> MODEL: MPrefixExpressionBitfieldInc
+
+-> b predec    obj.set__b(obj.get__b() - 1)
+=> MODEL: MPrefixExpressionBitfieldDec
+
+-> b infix     obj.get__b() + obj.get__c()
+=> MODEL: MPrefixExpressionPlain
+
+-> b assign    obj.set__b(4)
+=> MODEL: MInfixAssignmentWithBitfieldOnLeft
+
+-> b compound  obj.set__b(obj.get__b() + 2)
+=> MODEL: MCompoundWithBitfieldOnLeft
+
