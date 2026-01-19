@@ -6,19 +6,45 @@ Implements requirements: UF_004, UF_007
 import streamlit as st
 from converter import CppToJavaConverter
 import json
+from pathlib import Path
 
 
 def main():
     st.set_page_config(
-        page_title="C++ to Java Converter",
-        page_icon="🔄",
+        page_title="Конвертер C++ в Java",
+        page_icon="file_icon",  # Placeholder for icon
         layout="wide"
     )
     
-    st.title("🔄 C++ to Java Source Code Converter")
+    # Custom CSS for styling
     st.markdown("""
-    This tool converts C++ source code to Java source code using AST-based parsing with libclang.
-    It handles various C++ constructs including classes, templates, RAII patterns, and operator overloading.
+    <style>
+    .main {
+        background-color: white;
+        color: black;
+    }
+    .stButton>button {
+        background-color: #007bff;
+        color: white;
+        border: none;
+    }
+    .stButton>button:hover {
+        background-color: #0056b3;
+    }
+    .css-1d391kg, .css-1off84d, .css-1avcm0n {
+        background-color: white !important;
+        color: black !important;
+    }
+    .st-emotion-cache-1v0mbdj {
+        border: 1px solid #007bff;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    st.title("🔄 Конвертер исходного кода C++ в Java")
+    st.markdown("""
+    Этот инструмент преобразует исходный код C++ в код Java с использованием парсинга на основе AST с помощью libclang.
+    Он обрабатывает различные конструкции C++, включая классы, шаблоны, паттерны RAII и перегрузку операторов.
     """)
 
     # Initialize session state
@@ -28,44 +54,64 @@ def main():
         st.session_state.conversion_report = {}
     if 'error_message' not in st.session_state:
         st.session_state.error_message = ""
+    if 'cpp_input' not in st.session_state:
+        st.session_state.cpp_input = ""
     
     # Sidebar for settings
-    st.sidebar.header("⚙️ Settings")
+    st.sidebar.header("⚙️ Настройки")
     conversion_mode = st.sidebar.radio(
-        "Conversion Mode:",
+        "Режим конвертации:",
         ("strict", "flexible"),
-        help="Strict mode stops on unsupported features, flexible mode generates stubs with TODO comments"
+        help="Строгий режим останавливается при неподдерживаемых конструкциях, гибкий режим генерирует заглушки с комментариями TODO"
     )
     
-    verbose_output = st.sidebar.checkbox("Verbose Output", value=False)
+    verbose_output = st.sidebar.checkbox("Подробный вывод", value=False)
     
     # Create tabs for input and examples
-    tab1, tab2, tab3 = st.tabs(["📝 Input Code", "📚 Examples", "📋 Conversion Report"])
+    tab1, tab2, tab3 = st.tabs(["📝 Ввод кода", "📚 Примеры", "📋 Отчет о конвертации"])
     
     with tab1:
+        # File uploader for C++ files
+        uploaded_file = st.file_uploader(
+            "Загрузите C++ файл (.cpp, .h, .cxx, .cc)",
+            type=['cpp', 'cxx', 'cc', 'c', 'h', 'hpp'],
+            key="file_uploader"
+        )
+        
+        if uploaded_file is not None:
+            # Read the uploaded file
+            content = uploaded_file.read().decode("utf-8")
+            st.session_state.cpp_input = content
+            st.success(f"Файл '{uploaded_file.name}' успешно загружен!")
+        
         # Text area for C++ code input
         cpp_input = st.text_area(
-            "Enter your C++ code:",
+            "Введите ваш C++ код:",
+            value=st.session_state.cpp_input,
             height=400,
-            placeholder="// Paste your C++ code here...\n// Supports classes, functions, templates, namespaces, etc.",
-            key="cpp_input"
+            placeholder="// Вставьте ваш C++ код сюда...\n// Поддерживает классы, функции, шаблоны, пространства имен и т.д.",
+            key="cpp_input_textarea"
         )
+        
+        # Update session state when text area changes
+        if cpp_input != st.session_state.cpp_input:
+            st.session_state.cpp_input = cpp_input
         
         # Conversion button
         col1, col2 = st.columns([1, 3])
         with col1:
-            convert_clicked = st.button("🔄 Convert to Java", type="primary")
+            convert_clicked = st.button("🔄 Конвертировать в Java", type="primary")
         
         with col2:
-            st.caption("Note: This converter uses libclang for accurate AST parsing and semantic analysis.")
+            st.caption("Примечание: Этот конвертер использует libclang для точного синтаксического анализа AST и семантического анализа.")
     
     with tab2:
-        st.subheader("Sample C++ Code Examples")
+        st.subheader("Примеры кода C++")
         
-        example_tabs = st.tabs(["CppClass", "Template", "Namespace", "Operator"])
+        example_tabs = st.tabs(["Класс", "Шаблон", "Пространство имен", "Оператор"])
         
         with example_tabs[0]:
-            class_example = """// Basic class with constructor and methods
+            class_example = """// Базовый класс с конструктором и методами
 class Rectangle {
 private:
     double width, height;
@@ -82,16 +128,16 @@ public:
     }
     
     ~Rectangle() {
-        // Cleanup code
+        // Код очистки
     }
 };"""
             st.code(class_example, language="cpp")
-            if st.button("Load Class Example"):
+            if st.button("Загрузить пример класса"):
                 st.session_state.cpp_input = class_example
                 st.rerun()
         
         with example_tabs[1]:
-            template_example = """// Template class
+            template_example = """// Шаблон класса
 template<typename T>
 class Container {
 private:
@@ -112,12 +158,12 @@ public:
     }
 };"""
             st.code(template_example, language="cpp")
-            if st.button("Load Template Example"):
+            if st.button("Загрузить пример шаблона"):
                 st.session_state.cpp_input = template_example
                 st.rerun()
         
         with example_tabs[2]:
-            namespace_example = """// Namespace usage
+            namespace_example = """// Использование пространства имен
 namespace graphics {
     namespace shapes {
         class Circle {
@@ -132,12 +178,12 @@ namespace graphics {
     }
 }"""
             st.code(namespace_example, language="cpp")
-            if st.button("Load Namespace Example"):
+            if st.button("Загрузить пример пространства имен"):
                 st.session_state.cpp_input = namespace_example
                 st.rerun()
         
         with example_tabs[3]:
-            operator_example = """// Operator overloading
+            operator_example = """// Перегрузка оператора
 class Complex {
 private:
     double real, imag;
@@ -158,14 +204,14 @@ public:
     }
 };"""
             st.code(operator_example, language="cpp")
-            if st.button("Load Operator Example"):
+            if st.button("Загрузить пример оператора"):
                 st.session_state.cpp_input = operator_example
                 st.rerun()
     
     # Perform conversion when button is clicked
     if convert_clicked and cpp_input.strip():
         try:
-            with st.spinner("Converting C++ code to Java... This may take a moment."):
+            with st.spinner("Конвертируем C++ код в Java... Это может занять некоторое время."):
                 converter = CppToJavaConverter(mode=conversion_mode, verbose=verbose_output)
                 java_output = converter.convert(cpp_input)
                 
@@ -173,31 +219,31 @@ public:
                 st.session_state.conversion_report = converter.generate_report()
                 st.session_state.error_message = ""
                 
-                st.success("✅ Conversion completed successfully!")
+                st.success("✅ Конвертация успешно завершена!")
                 
         except Exception as e:
-            st.session_state.error_message = f"❌ Error during conversion: {str(e)}"
+            st.session_state.error_message = f"❌ Ошибка во время конвертации: {str(e)}"
             st.session_state.converted_code = ""
             st.session_state.conversion_report = {}
             st.error(st.session_state.error_message)
     
     # Display results if available
     if st.session_state.converted_code:
-        st.subheader("📤 Converted Java Code")
+        st.subheader("📤 Сконвертированный Java код")
         
         # Show the converted code
         st.code(st.session_state.converted_code, language="java")
         
         # Provide download button
         st.download_button(
-            label="📥 Download Java Code",
+            label="📥 Скачать Java код",
             data=st.session_state.converted_code,
             file_name="converted_code.java",
             mime="text/plain"
         )
     
     with tab3:
-        st.subheader("📊 Conversion Report")
+        st.subheader("📊 Отчет о конвертации")
         
         if st.session_state.conversion_report:
             report = st.session_state.conversion_report
