@@ -1,15 +1,12 @@
-"""
-Main C++ to Java converter implementation
-Implements requirements: FE_001-FE_004, TR_001-TR_004, BE_001-BE_003, VT_001-VT_003
-"""
-
+import clang.cindex
 import re
 import json
-import clang.cindex
-from typing import Dict, List, Optional, Any, Union
+from typing import Any, Dict, List, Optional
+import tempfile
 import logging
 from datetime import datetime
-
+import time
+# clang.cindex.Config.set_library_path("C:/Dev/c-_to_java_converter/venv/Lib/site-packages/clang/native")
 
 class CppToJavaConverter:
     """
@@ -25,6 +22,8 @@ class CppToJavaConverter:
             mode (str): "strict" or "flexible" conversion mode
             verbose (bool): Enable verbose logging
         """
+        
+
         self.mode = mode
         self.verbose = verbose
         self.logger = logging.getLogger(__name__) if verbose else logging.getLogger()
@@ -40,29 +39,7 @@ class CppToJavaConverter:
         self.ast_node_count = 0
         self.last_conversion_stats = {}
 
-        # Set up libclang
-        try:
-            # Try to find libclang library automatically
-            clang.cindex.Config.set_library_path('/usr/lib')  # Common Linux location
-        except:
-            try:
-                # Try specific LLVM versions
-                clang.cindex.Config.set_library_file('/usr/lib/llvm-14/lib/libclang.so')  # Ubuntu/Debian
-            except:
-                try:
-                    clang.cindex.Config.set_library_file('/usr/lib/x86_64-linux-gnu/libclang-14.so')  # Alternative location
-                except:
-                    try:
-                        clang.cindex.Config.set_library_file('/usr/lib/x86_64-linux-gnu/libclang-14.so.14.0.6')  # Specific version
-                    except:
-                        try:
-                            clang.cindex.Config.set_library_file('/usr/lib/llvm-14/lib/libclang.dylib')  # macOS
-                        except:
-                            try:
-                                clang.cindex.Config.set_search_path('/usr/lib/clang/14.0.6/lib/')  # Alternative
-                            except:
-                                # If all else fails, let libclang find it automatically
-                                pass
+        
 
     def convert(self, cpp_code: str, source_file_path: Optional[str] = None) -> str:
         """
@@ -123,7 +100,6 @@ class CppToJavaConverter:
     def _parse_with_libclang(self, cpp_code: str, source_file_path: Optional[str] = None) -> Any:
         """Parse C++ code using libclang and return AST"""
         # Write temporary file for libclang to parse
-        import tempfile
 
         if source_file_path is None:
             with tempfile.NamedTemporaryFile(mode='w', suffix='.cpp', delete=False) as temp_file:
@@ -171,11 +147,10 @@ class CppToJavaConverter:
 
     def _transform_ast(self, tu) -> List[Any]:
         """Transform C++ AST to internal representation suitable for Java generation"""
-        # Walk through AST and collect relevant nodes
         java_ast = []
 
         def traverse(node, depth=0):
-            self.ast_node_count += 1  # Count nodes for reporting
+            self.ast_node_count += 1
 
             # Handle different kinds of declarations
             if node.kind == clang.cindex.CursorKind.CLASS_DECL:
@@ -192,8 +167,6 @@ class CppToJavaConverter:
                 java_ast.append(self._handle_constructor(node))
             elif node.kind == clang.cindex.CursorKind.DESTRUCTOR:
                 java_ast.append(self._handle_destructor(node))
-            elif node.kind == clang.cindex.CursorKind.CXX_METHOD:
-                java_ast.append(self._handle_method(node))
             elif node.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
                 java_ast.append(self._handle_typedef(node))
             elif node.kind == clang.cindex.CursorKind.MACRO_DEFINITION:
@@ -206,30 +179,8 @@ class CppToJavaConverter:
                 java_ast.append(self._handle_class_template(node))
             elif node.kind == clang.cindex.CursorKind.FUNCTION_TEMPLATE:
                 java_ast.append(self._handle_function_template(node))
-            elif node.kind == clang.cindex.CursorKind.CXX_ACCESS_SPEC_DECL:
-                # Access specifiers are handled within class context
-                pass
-            elif node.kind == clang.cindex.CursorKind.INHERITANCE:
-                # Inheritance info is collected in class processing
-                pass
-            elif node.kind == clang.cindex.CursorKind.CXX_OVERRIDE_ATTR:
-                # Override attribute - note for Java translation
-                pass
-            elif node.kind == clang.cindex.CursorKind.CXX_FINAL_ATTR:
-                # Final attribute - translate to Java final
-                pass
-            elif node.kind == clang.cindex.CursorKind.CXX_NOEXCEPT_ATTR:
-                # Noexcept - Java doesn't have exact equivalent
-                pass
             elif node.kind == clang.cindex.CursorKind.CONVERSION_FUNCTION:
-                # Handle conversion operators (like operator bool())
                 java_ast.append(self._handle_conversion_function(node))
-            elif node.kind == clang.cindex.CursorKind.CXX_CAST_OPERATOR:
-                # Cast operators
-                java_ast.append(self._handle_cast_operator(node))
-            elif node.kind == clang.cindex.CursorKind.CXX_ACCESS_SPEC_DECL:
-                # Access specifiers - these are handled in class context
-                pass
             else:
                 # Log unhandled node types for debugging
                 if self.verbose:
@@ -261,7 +212,7 @@ class CppToJavaConverter:
 
         # Process children to gather class information
         for child in node.get_children():
-            if child.kind == clang.cindex.CursorKind.CXX_BASESpecifier:
+            if child.kind == clang.cindex.CursorKind.CXX_BASE_SPECIFIER:  # ✅ ИСПРАВЛЕНО
                 # Handle inheritance
                 base_class_name = child.type.spelling
                 if base_class_name:
@@ -270,14 +221,6 @@ class CppToJavaConverter:
                         'name': base_class_name,
                         'access': access_modifier
                     })
-
-                    # Check if multiple inheritance (not allowed in Java)
-                    if len(class_info['base_classes']) > 1:
-                        msg = f"Multiple inheritance detected in class {class_info['name']} - this is not supported in Java. Using interfaces/composition instead."
-                        if self.mode == "strict":
-                            raise ValueError(msg)
-                        else:
-                            self.warnings.append(msg)
 
             elif child.kind == clang.cindex.CursorKind.CXX_METHOD:
                 method_info = self._handle_method(child)
@@ -307,20 +250,29 @@ class CppToJavaConverter:
             elif child.kind == clang.cindex.CursorKind.CXX_FINAL_ATTR:
                 class_info['is_final'] = True
 
+        # ✅ Проверка множественного наследования — после цикла
+        if len(class_info['base_classes']) > 1:
+            msg = f"Multiple inheritance detected in class {class_info['name']} - this is not supported in Java. Using interfaces/composition instead."
+            if self.mode == "strict":
+                raise ValueError(msg)
+            else:
+                self.warnings.append(msg)
+
         return class_info
 
     def _handle_function_declaration(self, node) -> Dict[str, Any]:
-        """Handle C++ function declaration"""
+        """Handle C++ global function declaration"""
         return {
             'kind': 'function',
             'name': node.spelling,
             'return_type': node.result_type.spelling,
             'parameters': [self._handle_param(param) for param in node.get_arguments()],
-            'is_static': node.is_static_method(),
-            'is_virtual': node.is_virtual_method(),
-            'is_const': hasattr(node, 'is_const_method') and node.is_const_method(),
+            'is_static': False,  # Global functions are not "static" in class sense
+            'is_virtual': False,  # Not applicable to free functions
+            'is_const': False,    # Not applicable to free functions
             'location': f"{node.location.file}:{node.location.line}"
         }
+    
 
     def _handle_variable_declaration(self, node) -> Dict[str, Any]:
         """Handle C++ variable declaration"""
@@ -334,8 +286,6 @@ class CppToJavaConverter:
         }
 
     def _handle_namespace(self, node) -> Dict[str, Any]:
-        """Handle C++ namespace declaration"""
-        # In Java, namespaces become packages
         return {
             'kind': 'namespace',
             'name': node.spelling,
@@ -347,8 +297,8 @@ class CppToJavaConverter:
         """Handle template parameter"""
         return {
             'kind': 'template_param',
-            'name': node.spelling,
-            'type': node.type.spelling if node.type else 'typename',
+            'name': node.spelling or 'T',
+            'type': 'typename',
             'location': f"{node.location.file}:{node.location.line}"
         }
 
@@ -395,10 +345,12 @@ class CppToJavaConverter:
 
     def _handle_typedef(self, node) -> Dict[str, Any]:
         """Handle typedef declaration"""
+        underlying = getattr(node, 'underlying_typedef_type', None)
+        underlying_type = underlying.spelling if underlying else 'void'
         return {
             'kind': 'typedef',
             'name': node.spelling,
-            'underlying_type': node.underlying_typedef_type.spelling,
+            'underlying_type': underlying_type,
             'location': f"{node.location.file}:{node.location.line}"
         }
 
@@ -431,13 +383,14 @@ class CppToJavaConverter:
 
     def _is_constant_macro(self, macro_text: str) -> bool:
         """Check if macro represents a constant value"""
-        # Simple heuristic: contains only literals, numbers, and operators
-        import re
-        # Remove whitespace and common operators to see if it's just a literal
-        cleaned = re.sub(r'[+\\-*/%<>!=&|^~(),\\s]+', '', macro_text.strip())
-        return cleaned.replace('.', '').replace('_', '').isdigit() or \
-               (cleaned.startswith('"') and cleaned.endswith('"')) or \
-               (cleaned.lower() in ['true', 'false'])
+        text = macro_text.strip()
+        if text.lower() in ('true', 'false'):
+            return True
+        if text.startswith('"') and text.endswith('"'):
+            return True
+        # Remove operators and whitespace; allow digits, ., _
+        cleaned = re.sub(r'[-+*/%<>!=&|^~(),\s]+', '', text)
+        return cleaned.replace('.', '').replace('_', '').isdigit()
 
     def _handle_enum_declaration(self, node) -> Dict[str, Any]:
         """Handle enum declaration"""
@@ -459,21 +412,46 @@ class CppToJavaConverter:
     def _handle_class_template(self, node) -> Dict[str, Any]:
         """Handle class template"""
         template_params = []
+        class_decl_node = None
+
         for child in node.get_children():
             if child.kind == clang.cindex.CursorKind.TEMPLATE_TYPE_PARAMETER:
                 template_params.append({
                     'name': child.spelling,
-                    'type': 'typename'  # Default for template params
+                    'type': 'typename'
                 })
-            elif child.kind == clang.cindex.CursorKind.TEMPLATE_NON_TYPE_PARAMETER:
+            elif child.kind == clang.cindex.CursorType.TEMPLATE_NON_TYPE_PARAMETER:
                 template_params.append({
                     'name': child.spelling,
                     'type': child.type.spelling,
                     'is_non_type': True
                 })
+            elif child.kind == clang.cindex.CursorKind.CLASS_DECL:
+                class_decl_node = child
 
-        # Process the template class body
-        class_body = self._handle_class_declaration(node)  # Reuse class handling logic
+        if class_decl_node is None:
+            # Попробуем найти STRUCT_DECL (иногда используется)
+            for child in node.get_children():
+                if child.kind == clang.cindex.CursorKind.STRUCT_DECL:
+                    class_decl_node = child
+                    break
+
+        class_body = {}
+        if class_decl_node:
+            class_body = self._handle_class_declaration(class_decl_node)
+        else:
+            # Fallback: минимальная информация
+            class_body = {
+                'kind': 'class',
+                'name': node.spelling,
+                'members': [],
+                'methods': [],
+                'constructors': [],
+                'destructors': [],
+                'base_classes': [],
+                'is_final': False,
+                'location': f"{node.location.file}:{node.location.line}"
+            }
 
         return {
             'kind': 'class_template',
@@ -535,11 +513,14 @@ class CppToJavaConverter:
 
     def _handle_param(self, param_node) -> Dict[str, Any]:
         """Handle function/method parameter"""
+        type_kind = param_node.type.kind
+        is_ref = (type_kind == clang.cindex.TypeKind.LVALUEREFERENCE or
+                type_kind == clang.cindex.TypeKind.RVALUEREFERENCE)
         return {
             'name': param_node.spelling,
             'type': param_node.type.spelling,
             'is_const': param_node.type.is_const_qualified(),
-            'is_reference': param_node.type.get_reference().kind != clang.cindex.TypeKind.INVALID
+            'is_reference': is_ref
         }
 
     def _handle_namespace_child(self, child_node):
@@ -579,97 +560,124 @@ class CppToJavaConverter:
             self.warnings.append(msg)
 
     def _generate_java_code(self, java_ast: List[Any]) -> str:
-        """Generate Java code from internal AST representation"""
-        java_lines = []
+        # 1. Извлекаем package
+        package_line = None
+        classes = []
+        enums = []
+        global_functions = []
+        constants = []
+        other_lines = []
 
-        # Process each element in the AST
         for element in java_ast:
             elem_type = element.get('kind', '')
-
-            if elem_type == 'class':
-                java_lines.append(self._generate_java_class(element))
-            elif elem_type == 'function':
-                java_lines.append(self._generate_java_function(element))
-            elif elem_type == 'variable':
-                java_lines.append(self._generate_java_variable(element))
-            elif elem_type == 'namespace':
-                # Namespaces become packages - this affects the overall file structure
+            if elem_type == 'namespace':
                 pkg_name = self._convert_namespace_to_package(element['name'])
-                java_lines.insert(0, f"package {pkg_name};\n")
-            elif elem_type == 'typedef':
-                # Typedefs become type aliases in Java (usually handled by direct substitution)
-                java_lines.append(f"// typedef {element['name']} = {element['underlying_type']}; // Handled via direct substitution")
+                package_line = f"package {pkg_name};"
+            elif elem_type == 'class':
+                classes.append(self._generate_java_class(element))
+            elif elem_type == 'enum':
+                enums.append(self._generate_java_enum(element))
+            elif elem_type == 'function':
+                global_functions.append(element)
             elif elem_type == 'macro_constant':
-                # Macros become constants in Java
                 java_type = self._cpp_to_java_type(element.get('underlying_type', 'int'))
                 java_name = self._cpp_name_to_java_name(element['name']).upper()
-                java_lines.append(f"public static final {java_type} {java_name} = {element['value']};")
-            elif elem_type == 'enum':
-                java_lines.append(self._generate_java_enum(element))
-            elif elem_type == 'class_template':
-                java_lines.append(self._generate_java_template_class(element))
-            elif elem_type == 'function_template':
-                java_lines.append(self._generate_java_template_function(element))
+                constants.append(f"public static final {java_type} {java_name} = {element['value']};")
+            elif elem_type == 'variable':
+                constants.append(self._generate_java_variable(element))
+            elif elem_type in ('class_template', 'function_template'):
+                # Генерируем заглушки или предупреждения
+                other_lines.append(f"// Template '{element['name']}' not fully supported in Java")
+            elif elem_type == 'typedef':
+                other_lines.append(f"// typedef {element['name']} = {element['underlying_type']};")
             elif elem_type == 'conversion_operator':
-                # Conversion operators become explicit conversion methods
-                java_lines.append(f"// Conversion operator to {element['target_type']} -> {element['method_name']}()")
-            else:
-                # Other elements might be handled differently or skipped
-                java_lines.append(f"// Unhandled element: {element}")
+                other_lines.append(f"// Conversion operator to {element['target_type']}")
 
-        return '\n'.join(java_lines)
+        # 2. Генерируем единый Util-класс для всех функций
+        for element in java_ast:
+            if element.get('kind') in ('function', 'function_template'):
+                global_functions.append(element)
+        
+        if global_functions:
+            other_lines.append(self._generate_util_class(global_functions))
+
+        # 3. Собираем всё вместе
+        lines = []
+        if package_line:
+            lines.append(package_line)
+            lines.append("")
+
+        # Импорты (если есть)
+        if self.java_imports:
+            for imp in sorted(self.java_imports):
+                lines.append(f"import {imp};")
+            lines.append("")
+
+        # Константы на уровне файла (в Java они должны быть внутри класса!)
+        if constants:
+            # Создаём отдельный класс для констант, например Constants
+            const_class = self._generate_constants_class(constants)
+            classes.insert(0, const_class)
+
+        lines.extend(classes)
+        lines.extend(enums)
+        lines.extend(other_lines)
+
+        return '\n'.join(lines)
 
     def _generate_java_class(self, class_info: Dict[str, Any]) -> str:
-        """Generate Java class from C++ class info"""
         java_lines = []
 
         # Determine modifiers
         modifiers = ["public"]
         if class_info.get('is_final', False):
             modifiers.append("final")
-        elif any(m.get('is_virtual', False) for m in class_info.get('methods', [])):
-            modifiers.append("abstract")
+        # Убираем автоматическое добавление 'abstract' — слишком рискованно
+        # elif any(...): ...
 
-        # Handle inheritance
+        # Handle inheritance and AutoCloseable
         extends_clause = ""
-        implements_clause = ""
+        implements_parts = []
 
         base_classes = class_info.get('base_classes', [])
         if base_classes:
-            # In Java, single inheritance only. Multiple inheritance becomes interfaces/composition
             java_bases = []
-            interfaces = []
-
             for base in base_classes:
                 base_name = base['name']
                 java_base_name = self._cpp_name_to_java_name(base_name)
-
-                # For now, assume first base is the parent class, others become interfaces
-                # In practice, this would need more sophisticated analysis
                 if len(java_bases) == 0:
                     java_bases.append(java_base_name)
                 else:
-                    interfaces.append(java_base_name)
+                    implements_parts.append(java_base_name)
 
             if java_bases:
-                extends_clause = f" extends {''.join(java_bases[:1])}"  # Only first base
-            if interfaces:
-                implements_clause = f" implements {', '.join(interfaces)}"
+                extends_clause = f" extends {java_bases[0]}"
+
+        # Add AutoCloseable if destructor exists
+        has_destructor = bool(class_info.get('destructors'))
+        if has_destructor:
+            self.java_imports.add("java.lang.AutoCloseable")
+            implements_parts.append("AutoCloseable")
+
+        implements_clause = ""
+        if implements_parts:
+            implements_clause = f" implements {', '.join(implements_parts)}"
 
         # Start class declaration
         class_name = self._cpp_name_to_java_name(class_info['name'])
         java_lines.append(f"{' '.join(modifiers)} class {class_name}{extends_clause}{implements_clause} {{")
+        java_lines.append("")
 
         # Add fields
         for field in class_info.get('members', []):
-            access = field.get('access', 'private')  # Default to private in Java
+            access = field.get('access', 'private')
             java_type = self._cpp_to_java_type(field['type'])
             java_name = self._cpp_name_to_java_name(field['name'])
-
             static_keyword = "static " if field.get('is_static', False) else ""
             final_keyword = "final " if field.get('is_const', False) else ""
-
             java_lines.append(f"    {access} {static_keyword}{final_keyword}{java_type} {java_name};")
+
+        java_lines.append("")
 
         # Add constructors
         for constructor in class_info.get('constructors', []):
@@ -677,90 +685,104 @@ class CppToJavaConverter:
                 f"{self._cpp_to_java_type(p['type'])} {self._cpp_name_to_java_name(p['name'])}"
                 for p in constructor.get('parameters', [])
             ])
-
             java_lines.append(f"    public {class_name}({params}) {{")
             java_lines.append("        // Constructor implementation")
             java_lines.append("    }")
-
-        # Add destructor handling as close() method for AutoCloseable
-        destructors = class_info.get('destructors', [])
-        if destructors:
-            # Add AutoCloseable import
-            self.java_imports.add("java.lang.AutoCloseable")
             java_lines.append("")
-            java_lines.append("    // Destructor emulation via AutoCloseable")
+
+        # Add destructor as close()
+        if has_destructor:
+            java_lines.append("    @Override")
             java_lines.append("    public void close() {")
-            java_lines.append("        // Emulated destructor code here")
-            for dtor in destructors:
-                java_lines.append(f"        // Original destructor from {dtor['location']}")
+            java_lines.append("        // Emulated destructor")
             java_lines.append("    }")
+            java_lines.append("")
 
         # Add methods
+        has_equals = False
         for method in class_info.get('methods', []):
-            java_lines.extend(self._generate_java_method(method, class_info['name']))
+            method_lines = self._generate_java_method(method, class_name)
+            # Check if this is equals
+            if any("public boolean equals(" in line for line in method_lines):
+                has_equals = True
+            java_lines.extend(method_lines)
+            java_lines.append("")
 
-        # Close class
+        # Add hashCode if equals is present
+        if has_equals:
+            java_lines.append("    @Override")
+            java_lines.append("    public int hashCode() {")
+            java_lines.append("        // TODO: Generate proper hash code based on fields")
+            java_lines.append("        return super.hashCode();")
+            java_lines.append("    }")
+            java_lines.append("")
+
         java_lines.append("}")
-        java_lines.append("")  # Empty line after class
-
         return '\n'.join(java_lines)
 
     def _generate_java_method(self, method_info: Dict[str, Any], class_name: str) -> List[str]:
         """Generate Java method from C++ method info"""
-        java_lines = []
-
         # Determine access level
         access = method_info.get('access', 'public')
-
-        # Determine modifiers
         modifiers = [access]
+
+        # Add @Override if needed
+        if method_info.get('is_override', False):
+            modifiers.insert(0, '@Override')
+
+        # Handle static/final
         if method_info.get('is_static', False):
             modifiers.append('static')
         if method_info.get('is_final', False):
             modifiers.append('final')
-        if method_info.get('is_virtual', False) and not method_info.get('is_override', False):
-            # Virtual methods in C++ might become abstract in Java
-            # Or just remain as regular methods with possibility of override
-            pass  # Regular method allows overriding by default in Java
 
         # Handle operator overloads
-        method_name = method_info['name']
-        if method_name.startswith('operator'):
-            # Convert operator to Java method name
-            method_name = self._convert_operator_name(method_name)
-            # Special handling for certain operators
-            if method_name in ['equals', 'hashCode']:
-                modifiers.append('@Override')
+        original_name = method_info['name']
+        method_name = original_name
+        is_equals = False
+        is_hash_code = False
 
-        # Handle return type
-        return_type = self._cpp_to_java_type(method_info['return_type'])
+        if original_name.startswith('operator'):
+            method_name = self._convert_operator_name(original_name)
+            if method_name == 'equals':
+                is_equals = True
+                method_name = 'equals'
+            elif method_name == 'hashCode':
+                is_hash_code = True
+                method_name = 'hashCode'
 
-        # Handle parameters
-        params = []
-        for param in method_info.get('parameters', []):
-            param_type = self._cpp_to_java_type(param['type'])
-            param_name = self._cpp_name_to_java_name(param['name'])
-            params.append(f"{param_type} {param_name}")
-
-        param_str = ", ".join(params)
-
-        # Special handling for comparison operators
-        if method_name == 'equals':
+        # Special handling for equals: enforce correct signature
+        if is_equals:
             return_type = 'boolean'
-            if len(params) == 1 and params[0].startswith('Object'):
-                # Already properly formatted for equals
-                pass
-            else:
-                # Ensure proper equals signature
-                param_str = 'Object obj'
+            param_str = 'Object obj'
+            if '@Override' not in modifiers:
+                modifiers.insert(0, '@Override')
+        else:
+            return_type = self._cpp_to_java_type(method_info['return_type'])
+            # Handle parameters normally
+            params = []
+            for param in method_info.get('parameters', []):
+                param_type = self._cpp_to_java_type(param['type'])
+                param_name = self._cpp_name_to_java_name(param['name'])
+                params.append(f"{param_type} {param_name}")
+            param_str = ", ".join(params)
 
+        # Generate method
+        java_lines = []
         java_lines.append(f"    {' '.join(modifiers)} {return_type} {method_name}({param_str}) {{")
         java_lines.append("        // Method implementation")
-        if return_type != 'void':
-            java_lines.append(f"        return {self._get_default_value(return_type)}; // TODO: Implement method")
-        java_lines.append("    }")
 
+        if is_equals:
+            java_lines.append("        if (this == obj) return true;")
+            java_lines.append("        if (obj == null || getClass() != obj.getClass()) return false;")
+            java_lines.append("        // TODO: Compare relevant fields")
+            java_lines.append("        return true;")
+        elif return_type != 'void':
+            java_lines.append(f"        return {self._get_default_value(return_type)}; // TODO: Implement")
+
+        java_lines.append("    }")
         return java_lines
+    
 
     def _get_default_value(self, java_type: str) -> str:
         """Get default return value for a Java type"""
@@ -776,196 +798,177 @@ class CppToJavaConverter:
         }
         return defaults.get(java_type, 'null')
 
-    def _generate_java_function(self, func_info: Dict[str, Any]) -> str:
-        """Generate Java function (as static method in a utility class)"""
-        # Functions in C++ become static methods in Java utility classes
-        java_lines = []
+    
+    def _map_template_type(self, cpp_type: str, template_params: List[Dict[str, Any]]) -> str:
+        """Map C++ template types to Java generic types"""
+        # Сначала преобразуем базовый тип
+        java_type = self._cpp_to_java_type(cpp_type)
+    
+        # Заменяем параметры шаблона на их имена
+        for param in template_params:
+            if param.get('is_non_type', False):
+                continue
+            param_name = param['name']
+            # Заменяем целые слова (чтобы не затронуть подстроки)
+        
+            java_type = re.sub(r'\b' + re.escape(param_name) + r'\b', param_name, java_type)
+    
+        return java_type
+    
+    def _generate_util_class(self, functions: List[Dict[str, Any]]) -> str:
+        """Generate a single utility class containing all global and template functions"""
+        if not functions:
+            return ""
+    
+        lines = ["public class Util {"]
+    
+        for func in functions:
+            is_template = func.get('kind') == 'function_template'
+        
+            if is_template:
+                # Обработка шаблонной функции
+                template_params = func['template_parameters']
+                type_param_names = [p['name'] for p in template_params if not p.get('is_non_type', False)]
+                generics_clause = f"<{', '.join(type_param_names)}> " if type_param_names else ""
+            
+                # Используем исходную функцию внутри
+                inner_func = func['function_info']
+                access = inner_func.get('access', 'public')
+                return_type = self._map_template_type(inner_func['return_type'], template_params)
+                func_name = self._cpp_name_to_java_name(inner_func['name'])
+            
+                params = []
+                for param in inner_func.get('parameters', []):
+                    param_type = self._map_template_type(param['type'], template_params)
+                    param_name = self._cpp_name_to_java_name(param['name'])
+                    params.append(f"{param_type} {param_name}")
+                param_str = ", ".join(params)
+            
+                lines.append(f"    {access} static {generics_clause}{return_type} {func_name}({param_str}) {{")
+                lines.append("        // Template function implementation")
+                if return_type != 'void':
+                    lines.append(f"        return {self._get_default_value(return_type)}; // TODO: Implement")
+                lines.append("    }")
+            
+            else:
+                # Обработка обычной функции
+                access = func.get('access', 'public')
+                return_type = self._cpp_to_java_type(func['return_type'])
+                func_name = self._cpp_name_to_java_name(func['name'])
+                params = []
+                for param in func.get('parameters', []):
+                    param_type = self._cpp_to_java_type(param['type'])
+                    param_name = self._cpp_name_to_java_name(param['name'])
+                    params.append(f"{param_type} {param_name}")
+                param_str = ", ".join(params)
+            
+                lines.append(f"    {access} static {return_type} {func_name}({param_str}) {{")
+                lines.append("        // Function implementation")
+                if return_type != 'void':
+                    lines.append(f"        return {self._get_default_value(return_type)}; // TODO: Implement")
+                lines.append("    }")
+        
+            lines.append("")  # Empty line between methods
+    
+        lines.append("}")
+        return '\n'.join(lines)
+    
 
-        # Determine access level
-        access = func_info.get('access', 'public')
-
-        # Determine modifiers
-        modifiers = [access, 'static']
-
-        # Handle return type
-        return_type = self._cpp_to_java_type(func_info['return_type'])
-
-        # Handle function name
-        func_name = self._cpp_name_to_java_name(func_info['name'])
-
-        # Handle parameters
-        params = []
-        for param in func_info.get('parameters', []):
-            param_type = self._cpp_to_java_type(param['type'])
-            param_name = self._cpp_name_to_java_name(param['name'])
-            params.append(f"{param_type} {param_name}")
-
-        param_str = ", ".join(params)
-
-        java_lines.append(f"{access} class Util {{  // Utility class for global functions")
-        java_lines.append(f"    {' '.join(modifiers)} {return_type} {func_name}({param_str}) {{")
-        java_lines.append("        // Function implementation")
-        if return_type != 'void':
-            java_lines.append(f"        return {self._get_default_value(return_type)}; // TODO: Implement function")
-        java_lines.append("    }")
-        java_lines.append("}")
-
-        return '\n'.join(java_lines)
-
-    def _generate_java_variable(self, var_info: Dict[str, Any]) -> str:
-        """Generate Java variable declaration"""
-        access = 'public'  # Global vars become public static in Java
-        static_keyword = "static " if var_info.get('is_static', True) else ""  # Default to static for globals
-        final_keyword = "final " if var_info.get('is_const', False) else ""
-
-        java_type = self._cpp_to_java_type(var_info['type'])
-        java_name = self._cpp_name_to_java_name(var_info['name'])
-
-        return f"{access} {static_keyword}{final_keyword}{java_type} {java_name};"
+    def _generate_globals_class(self, variables: List[Dict[str, Any]]) -> str:
+        """Generate a class containing all global variables as static fields"""
+        if not variables:
+            return ""
+    
+        lines = ["public class Globals {"]
+    
+        for var in variables:
+            access = 'public'
+            static_keyword = "static " if var.get('is_static', True) else ""
+            final_keyword = "final " if var.get('is_const', False) else ""
+            java_type = self._cpp_to_java_type(var['type'])
+            java_name = self._cpp_name_to_java_name(var['name'])
+        
+            # Добавляем инициализацию по умолчанию
+            default_value = self._get_default_value(java_type)
+            lines.append(f"    {access} {static_keyword}{final_keyword}{java_type} {java_name} = {default_value};")
+    
+        lines.append("}")
+        return '\n'.join(lines)
 
     def _convert_namespace_to_package(self, namespace: str) -> str:
-        """Convert C++ namespace to Java package"""
-        # Convert namespace to lowercase with dots
-        return namespace.lower().replace('::', '.')
+        # Convert :: to .
+        pkg = namespace.replace('::', '.')
+    
+        # Split and sanitize each part
+        java_keywords = {
+            'abstract', 'assert', 'boolean', 'break', 'byte', 'case', 'catch',
+            'char', 'class', 'const', 'continue', 'default', 'do', 'double',
+            'else', 'enum', 'extends', 'final', 'finally', 'float', 'for',
+            'goto', 'if', 'implements', 'import', 'instanceof', 'int',
+            'interface', 'long', 'native', 'new', 'package', 'private',
+            'protected', 'public', 'return', 'short', 'static', 'strictfp',
+            'super', 'switch', 'synchronized', 'this', 'throw', 'throws',
+            'transient', 'try', 'void', 'volatile', 'while'
+        }
+    
+        parts = []
+        for part in pkg.split('.'):
+            clean_part = part.lower()
+            if clean_part in java_keywords:
+                clean_part = f"_{clean_part}"
+            # Also ensure it starts with a letter
+            if clean_part and clean_part[0].isdigit():
+                clean_part = f"_{clean_part}"
+            parts.append(clean_part)
+    
+        return '.'.join(parts)
+    
 
     def _generate_java_enum(self, enum_info: Dict[str, Any]) -> str:
         """Generate Java enum from C++ enum"""
-        java_lines = []
-
         enum_name = self._cpp_name_to_java_name(enum_info['name'])
-        java_lines.append(f"public enum {enum_name} {{")
-
         values = enum_info.get('values', [])
+    
+        if not values:
+            return f"public enum {enum_name} {{\n    // Empty enum\n}}"
+    
+        # Проверяем, есть ли нестандартные значения (требуется тело enum)
+        has_custom_values = any(val.get('value', i) != i for i, val in enumerate(values))
+    
+        lines = [f"public enum {enum_name} {{"]
+
+        # Генерируем значения
+        value_lines = []
         for i, val in enumerate(values):
-            separator = "," if i < len(values) - 1 else ";"
-            java_lines.append(f"    {val['name'].upper()}{separator}")
+            name = val['name'].upper()
+            if has_custom_values:
+                # Сохраняем оригинальное значение
+                value = val.get('value', i)
+                value_lines.append(f"    {name}({value})")
+            else:
+                value_lines.append(f"    {name}")
+    
+        if has_custom_values:
+            # Добавляем конструктор и поле
+            lines.extend(value_lines)
+            lines.append("    ;")
+            lines.append("")
+            lines.append("    private final int value;")
+            lines.append("")
+            lines.append("    private " + enum_name + "(int value) {")
+            lines.append("        this.value = value;")
+            lines.append("    }")
+            lines.append("")
+            lines.append("    public int getValue() {")
+            lines.append("        return value;")
+            lines.append("    }")
+        else:
+            # Простой enum без тела
+            lines.append(", ".join(v.strip() for v in value_lines) + "")
+    
+        lines.append("}")
+        return '\n'.join(lines)
 
-        java_lines.append("")
-        java_lines.append("    // Enum values with potential integer mappings")
-        java_lines.append("}")
-
-        return '\n'.join(java_lines)
-
-    def _generate_java_template_class(self, template_info: Dict[str, Any]) -> str:
-        """Generate Java generic class from C++ template class"""
-        java_lines = []
-
-        # Extract template parameters
-        template_params = template_info['template_parameters']
-        param_names = [p['name'] for p in template_params]
-
-        # Generate generics clause
-        generics_clause = ""
-        if param_names:
-            generics_clause = f"<{', '.join(param_names)}>"
-
-        # Process the class info inside the template
-        class_info = template_info['class_info']
-
-        # Determine modifiers
-        modifiers = ["public"]
-        if class_info.get('is_final', False):
-            modifiers.append("final")
-
-        # Handle inheritance (same as regular class)
-        extends_clause = ""
-        implements_clause = ""
-
-        base_classes = class_info.get('base_classes', [])
-        if base_classes:
-            # Apply same inheritance logic as regular classes
-            java_bases = []
-            interfaces = []
-
-            for base in base_classes:
-                base_name = base['name']
-                java_base_name = self._cpp_name_to_java_name(base_name)
-
-                if len(java_bases) == 0:
-                    java_bases.append(java_base_name)
-                else:
-                    interfaces.append(java_base_name)
-
-            if java_bases:
-                extends_clause = f" extends {''.join(java_bases[:1])}"
-            if interfaces:
-                implements_clause = f" implements {', '.join(interfaces)}"
-
-        # Generate class declaration with generics
-        class_name = self._cpp_name_to_java_name(class_info['name'])
-        java_lines.append(f"{' '.join(modifiers)} class {class_name}{generics_clause}{extends_clause}{implements_clause} {{")
-
-        # Add class body (fields, methods, etc.)
-        # For now, just add a comment about template parameters
-        param_descriptions = [f"{p['name']} ({p['type']})" for p in template_params]
-        java_lines.append(f"    // Template parameters: {', '.join(param_descriptions)}")
-
-        # Add fields
-        for field in class_info.get('members', []):
-            access = field.get('access', 'private')
-            java_type = self._cpp_to_java_type(field['type'])
-            java_name = self._cpp_name_to_java_name(field['name'])
-
-            static_keyword = "static " if field.get('is_static', False) else ""
-            final_keyword = "final " if field.get('is_const', False) else ""
-
-            java_lines.append(f"    {access} {static_keyword}{final_keyword}{java_type} {java_name};")
-
-        # Add methods (similar to regular class)
-        for method in class_info.get('methods', []):
-            java_lines.extend(self._generate_java_method(method, class_name))
-
-        # Close class
-        java_lines.append("}")
-        java_lines.append("")
-
-        return '\n'.join(java_lines)
-
-    def _generate_java_template_function(self, template_info: Dict[str, Any]) -> str:
-        """Generate Java generic method from C++ template function"""
-        # Template functions become generic static methods
-        func_info = template_info['function_info']
-
-        java_lines = []
-        java_lines.append("// Template function converted to generic method")
-
-        # Determine access level
-        access = func_info.get('access', 'public')
-
-        # Determine modifiers
-        modifiers = [access, 'static']
-
-        # Extract template parameters
-        template_params = template_info['template_parameters']
-        generics_clause = ""
-        if template_params:
-            param_names = [p['name'] for p in template_params]
-            generics_clause = f"<{', '.join(param_names)}> "
-
-        # Handle return type
-        return_type = self._cpp_to_java_type(func_info['return_type'])
-
-        # Handle function name
-        func_name = self._cpp_name_to_java_name(func_info['name'])
-
-        # Handle parameters
-        params = []
-        for param in func_info.get('parameters', []):
-            param_type = self._cpp_to_java_type(param['type'])
-            param_name = self._cpp_name_to_java_name(param['name'])
-            params.append(f"{param_type} {param_name}")
-
-        param_str = ", ".join(params)
-
-        java_lines.append(f"{access} class Util {{  // Utility class for template functions")
-        java_lines.append(f"    public {generics_clause}{return_type} {func_name}({param_str}) {{")
-        java_lines.append("        // Generic function implementation")
-        if return_type != 'void':
-            java_lines.append(f"        return {self._get_default_value(return_type)}; // TODO: Implement function")
-        java_lines.append("    }")
-        java_lines.append("}")
-
-        return '\n'.join(java_lines)
 
     def _generate_imports(self) -> str:
         """Generate Java import statements based on needed utilities"""
@@ -980,108 +983,90 @@ class CppToJavaConverter:
 
     def _cpp_to_java_type(self, cpp_type: str) -> str:
         """Convert C++ type to Java type"""
-        # Mapping of C++ basic types to Java equivalents
+        # Очищаем от const, volatile и т.п.
+        clean_type = re.sub(r'\b(const|volatile|mutable|struct|class)\s+', '', cpp_type).strip()
+    
         cpp_to_java_types = {
-            'int': 'int',
-            'long': 'long',
-            'short': 'short',
-            'char': 'byte',  # char in C++ is typically 1 byte, so map to Java byte
-            'wchar_t': 'char',  # wide char to Java char
-            'bool': 'boolean',
-            'float': 'float',
-            'double': 'double',
-            'void': 'void',
-            'unsigned int': 'int',
-            'unsigned long': 'long',
-            'unsigned short': 'short',
-            'unsigned char': 'byte',
-            'signed char': 'byte',
-            'long long': 'long',
-            'unsigned long long': 'long'
+            'int': 'int', 'long': 'long', 'short': 'short', 'char': 'byte',
+            'wchar_t': 'char', 'bool': 'boolean', 'float': 'float', 'double': 'double',
+            'void': 'void', 'unsigned int': 'int', 'unsigned long': 'long',
+            'unsigned short': 'short', 'unsigned char': 'byte', 'signed char': 'byte',
+            'long long': 'long', 'unsigned long long': 'long',
+            'size_t': 'long', 'std::string': 'String', 'string': 'String'
         }
 
-        # Handle pointer types - convert to Object reference or array
-        if '*' in cpp_type:
-            # Remove multiple pointer stars and replace with array notation
-            base_type = cpp_type.replace('*', '').strip()
-            java_base = cpp_to_java_types.get(base_type, base_type)
-            # For pointers, we'll use a special wrapper class in Java
-            return f"{java_base}Pointer"
+        # Указатели → массивы
+        if '*' in clean_type:
+            base_part = clean_type.split('*')[0].strip()
+            java_base = cpp_to_java_types.get(base_part, base_part)
+            return java_base + '[]'
 
-        # Handle array types
-        if '[' in cpp_type and ']' in cpp_type:
-            # Extract the base type
-            base_type_match = re.match(r'^([^\[\]]+)\s*\[.*\]', cpp_type)
-            if base_type_match:
-                base_type = base_type_match.group(1).strip()
-                java_base = cpp_to_java_types.get(base_type, base_type)
-                return f"{java_base}[]"
+        # Массивы
+        if '[' in clean_type and ']' in clean_type:
+            # Берём часть до первой [
+            base_part = clean_type.split('[')[0].strip()
+            java_base = cpp_to_java_types.get(base_part, base_part)
+            dim_count = clean_type.count('[')
+            return java_base + '[]' * dim_count
 
-        # Handle reference types
-        if '&' in cpp_type:
-            base_type = cpp_type.replace('&', '').strip()
-            java_base = cpp_to_java_types.get(base_type, base_type)
-            return java_base  # References become regular objects in Java
+        # Ссылки → обычный тип
+        if clean_type.endswith('&'):
+            clean_type = clean_type[:-1].strip()
 
-        # Direct mapping
-        return cpp_to_java_types.get(cpp_type, cpp_type)
+        return cpp_to_java_types.get(clean_type, clean_type)
+
+
+    JAVA_RESERVED_WORDS = {
+        'abstract', 'assert', 'boolean', 'break', 'byte', 'case', 'catch',
+        'char', 'class', 'const', 'continue', 'default', 'do', 'double',
+        'else', 'enum', 'extends', 'final', 'finally', 'float', 'for',
+        'goto', 'if', 'implements', 'import', 'instanceof', 'int',
+        'interface', 'long', 'native', 'new', 'package', 'private',
+        'protected', 'public', 'return', 'short', 'static', 'strictfp',
+        'super', 'switch', 'synchronized', 'this', 'throw', 'throws',
+        'transient', 'try', 'void', 'volatile', 'while', 'true', 'false', 'null'
+    }
+    JAVA_RESERVED_LOWER = {word.lower() for word in JAVA_RESERVED_WORDS}
 
     def _cpp_name_to_java_name(self, cpp_name: str, naming_convention: str = "camelCase") -> str:
         """Convert C++ name to Java name following Java conventions"""
         if not cpp_name:
             return cpp_name
 
-        # Handle reserved keywords in Java by adding underscore prefix
-        java_reserved = {
-            'abstract', 'assert', 'boolean', 'break', 'byte', 'case', 'catch',
-            'char', 'class', 'const', 'continue', 'default', 'do', 'double',
-            'else', 'enum', 'extends', 'final', 'finally', 'float', 'for',
-            'goto', 'if', 'implements', 'import', 'instanceof', 'int',
-            'interface', 'long', 'native', 'new', 'package', 'private',
-            'protected', 'public', 'return', 'short', 'static', 'strictfp',
-            'super', 'switch', 'synchronized', 'this', 'throw', 'throws',
-            'transient', 'try', 'void', 'volatile', 'while', 'true', 'false', 'null'
-        }
-
-        if cpp_name.lower() in [word.lower() for word in java_reserved]:
+        # Handle reserved keywords
+        if cpp_name.lower() in self.JAVA_RESERVED_LOWER:
             return f"_{cpp_name}"
 
-        # Split the name by underscores and other separators
-        parts = cpp_name.replace('-', '_').split('_')
+        # Split by underscores and hyphens
+        parts = [part for part in cpp_name.replace('-', '_').split('_') if part]
+    
+        if not parts:
+            return "_unnamed"
 
         if naming_convention == "PascalCase":
-            # Capitalize first letter of each part
-            java_name = ''.join(part.capitalize() for part in parts if part)
-        else:  # camelCase (default)
-            # First part lowercase, rest capitalized
-            if len(parts) == 1:
-                java_name = parts[0].lower()
-            else:
-                java_name = parts[0].lower() + ''.join(part.capitalize() for part in parts[1:] if part)
+            java_name = ''.join(part.capitalize() for part in parts)
+        else:  # camelCase
+            java_name = parts[0].lower() + ''.join(part.capitalize() for part in parts[1:])
 
-        # Ensure first character is alphabetic or underscore
-        if java_name and not (java_name[0].isalpha() or java_name[0] == '_'):
+        # Ensure valid Java identifier start
+        if not (java_name[0].isalpha() or java_name[0] == '_'):
             java_name = '_' + java_name
 
         return java_name
 
     def _convert_operator_name(self, op_name: str) -> str:
-        """
-        Convert C++ operator names to Java-friendly names
-        Since Java doesn't support operator overloading, we convert to method names
-        """
         op_mapping = {
             'operator+': 'plus',
             'operator-': 'minus',
             'operator*': 'times',
             'operator/': 'dividedBy',
             'operator%': 'modulo',
-            'operator==': 'equals',
-            'operator!=': 'notEquals',
-            'operator<': 'lessThan',
-            'operator>': 'greaterThan',
-            'operator<=': 'lessThanOrEqual',
-            'operator>=': 'greaterThanOrEqual',
+            'operator==': 'isEqualTo',          # ⚠️ Изменено с 'equals'
+            'operator!=': 'isNotEqualTo',       # ⚠️ Более читаемо
+            'operator<': 'isLessThan',
+            'operator>': 'isGreaterThan',
+            'operator<=': 'isLessThanOrEqual',
+            'operator>=': 'isGreaterThanOrEqual',
             'operator&&': 'logicalAnd',
             'operator||': 'logicalOr',
             'operator!': 'logicalNot',
@@ -1097,15 +1082,27 @@ class CppToJavaConverter:
             'operator->': 'arrow'
         }
 
-        return op_mapping.get(op_name, op_name.replace('operator', 'op'))
+        result = op_mapping.get(op_name)
+        if result is not None:
+            return result
+    
+        # Fallback: remove 'operator' prefix
+        if op_name.startswith('operator'):
+            return 'op' + op_name[8:].replace(' ', '_')
+    
+        return op_name
 
     def generate_report(self) -> Dict[str, Any]:
         """Generate a detailed conversion report"""
         return {
-            'stats': self.last_conversion_stats,
-            'warnings': self.warnings,
-            'errors': self.errors,
-            'processed_nodes': self.ast_node_count
+            'metadata': {
+                'mode': self.mode,
+                'timestamp': time.time(),
+                'processed_nodes': self.ast_node_count
+            },
+            'stats': dict(self.last_conversion_stats) if self.last_conversion_stats else {},
+            'warnings': list(self.warnings),
+            'errors': list(self.errors)
         }
 
 
