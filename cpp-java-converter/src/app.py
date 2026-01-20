@@ -1,12 +1,6 @@
-"""
-Streamlit web interface for the C++ to Java source code converter
-Implements requirements: UF_004, UF_007
-"""
 
 import streamlit as st
 from converter import CppToJavaConverter
-import json
-from pathlib import Path
 
 
 def main():

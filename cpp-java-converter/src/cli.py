@@ -1,9 +1,4 @@
-#!/usr/bin/env python3
-"""
-Command-line interface for C++ to Java source code converter
-Complies with requirements: FU_001-FU_007, UF_001-UF_007, SM_001-SM_003
-"""
-
+import clang
 import argparse
 import json
 import os
