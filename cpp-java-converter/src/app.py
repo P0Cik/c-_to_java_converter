@@ -6,11 +6,11 @@ from converter import CppToJavaConverter
 def main():
     st.set_page_config(
         page_title="Конвертер C++ в Java",
-        page_icon="file_icon",  # Placeholder for icon
+        page_icon="file_icon",
         layout="wide"
     )
     
-    # Custom CSS for styling
+    
     st.markdown("""
     <style>
     .main {

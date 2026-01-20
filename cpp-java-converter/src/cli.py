@@ -1,14 +1,12 @@
-import clang
 import argparse
 import json
-import os
 import sys
 import time
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any
 import logging
 
-from converter import CppToJavaConverter
+from converter_modules.core import CppToJavaConverter
 
 
 def setup_logging(verbose: bool):
@@ -48,7 +46,7 @@ def write_report(report_data: Dict[str, Any], report_path: str, format_type: str
     if format_type.lower() == "json":
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(report_data, f, indent=2, ensure_ascii=False)
-    else:  # txt format
+    else:  
         with open(path, 'w', encoding='utf-8') as f:
             f.write("C++ to Java Translation Report\n")
             f.write("=" * 40 + "\n\n")
@@ -121,30 +119,23 @@ Examples:
         help="Enable verbose output"
     )
     
-    parser.add_argument(
-        "--help", 
-        "-h", 
-        action="help",
-        help="Show this help message and exit"
-    )
-    
     args = parser.parse_args()
     
-    # Setup logging
+    
     setup_logging(args.verbose)
     logger = logging.getLogger(__name__)
     
     logger.info("Starting C++ to Java conversion...")
     logger.debug(f"Arguments: {args}")
     
-    # Validate inputs
+    
     input_paths = []
     for input_arg in args.input:
         input_path = Path(input_arg)
         if input_path.is_file():
             input_paths.append(input_path)
         elif input_path.is_dir():
-            # Recursively find C++ files in directory
+            
             cpp_extensions = {'.cpp', '.cxx', '.cc', '.c', '.h', '.hpp', '.hxx'}
             for ext in cpp_extensions:
                 input_paths.extend(input_path.rglob(f"*{ext}"))
@@ -158,14 +149,14 @@ Examples:
     
     logger.info(f"Found {len(input_paths)} input file(s)")
     
-    # Create output directory
+    
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Initialize converter
+    
     converter = CppToJavaConverter(mode=args.mode, verbose=args.verbose)
     
-    # Prepare report data
+    
     report_data = {
         "start_time": time.time(),
         "files_processed": [],
@@ -178,32 +169,30 @@ Examples:
     success_count = 0
     failure_count = 0
     
-    # Process each file
+    
     for cpp_file in input_paths:
         try:
             logger.info(f"Processing: {cpp_file}")
             
             start_time = time.time()
             
-            # Read C++ source
+            
             with open(cpp_file, 'r', encoding='utf-8') as f:
                 cpp_source = f.read()
             
-            # Convert to Java
+            
             java_result = converter.convert(cpp_source, str(cpp_file))
             
-            # Calculate processing time
+            
             processing_time = time.time() - start_time
-            
-            # Determine output path
-            relative_path = cpp_file.relative_to(cpp_file.parent.resolve())  # Preserve directory structure
+
+            # Генерируем имя выходного файла напрямую
             output_file = output_dir / f"{cpp_file.stem}.java"
-            
-            # Write Java file
+
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(java_result)
             
-            # Add to report
+            
             file_info = {
                 "original_path": str(cpp_file),
                 "output_path": str(output_file),
@@ -229,22 +218,22 @@ Examples:
                 print(f"Error in strict mode: {error_msg}", file=sys.stderr)
                 return 1
     
-    # Complete report
+    
     report_data["end_time"] = time.time()
     report_data["translation_time"] = report_data["end_time"] - report_data["start_time"]
     report_data["success_count"] = success_count
     report_data["failure_count"] = failure_count
-    report_data["warnings"] = list(set(report_data["warnings"]))  # Remove duplicates
+    report_data["warnings"] = list(set(report_data["warnings"]))  
     report_data["errors"] = list(set(report_data["errors"]))
     
-    # Write report if requested
+    
     if args.report:
         report_format = "json" if args.report.endswith('.json') else "txt"
         write_report(report_data, args.report, report_format)
         logger.info(f"Report written to: {args.report}")
     
-    # Print summary
-    print(f"\nConversion Summary:")
+    
+    print("\nConversion Summary:")
     print(f"  Successful: {success_count}")
     print(f"  Failed: {failure_count}")
     print(f"  Total time: {report_data['translation_time']:.2f}s")
