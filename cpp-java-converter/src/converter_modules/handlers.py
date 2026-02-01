@@ -85,22 +85,104 @@ def _handle_function_declaration(self, node) -> Dict[str, Any]:
 def _handle_variable_declaration(self, node) -> Dict[str, Any]:
     """Handle C++ variable declaration"""
     init_value = None
-    for child in node.get_children():
-        if child.kind == clang.cindex.CursorKind.INTEGER_LITERAL:
-            init_value = child.spelling
-        elif child.kind == clang.cindex.CursorKind.FLOATING_LITERAL:
-            init_value = child.spelling
-        elif child.kind == clang.cindex.CursorKind.STRING_LITERAL:
-            init_value = child.spelling
-        elif child.kind == clang.cindex.CursorKind.CHARACTER_LITERAL:
-            init_value = child.spelling
-        elif child.kind == clang.cindex.CursorKind.CXX_BOOL_LITERAL_EXPR:
-            init_value = child.spelling
-        elif child.kind == clang.cindex.CursorKind.UNEXPOSED_EXPR:
+    def extract_value_from_node(n):
+        """Recursively extract value from a node and its children"""
+        if n.kind == clang.cindex.CursorKind.INTEGER_LITERAL:
+            # Use tokens if spelling is empty
+            if n.spelling:
+                return n.spelling
+            else:
+                tokens = [t.spelling for t in n.get_tokens()]
+                return ' '.join(tokens) if tokens else None
+        elif n.kind == clang.cindex.CursorKind.FLOATING_LITERAL:
+            # Use tokens if spelling is empty
+            if n.spelling:
+                return n.spelling
+            else:
+                tokens = [t.spelling for t in n.get_tokens()]
+                return ' '.join(tokens) if tokens else None
+        elif n.kind == clang.cindex.CursorKind.STRING_LITERAL:
+            # Use tokens if spelling is empty
+            if n.spelling:
+                return n.spelling
+            else:
+                tokens = [t.spelling for t in n.get_tokens()]
+                return ' '.join(tokens) if tokens else None
+        elif n.kind == clang.cindex.CursorKind.CHARACTER_LITERAL:
+            # Use tokens if spelling is empty
+            if n.spelling:
+                return n.spelling
+            else:
+                tokens = [t.spelling for t in n.get_tokens()]
+                return ' '.join(tokens) if tokens else None
+        elif n.kind == clang.cindex.CursorKind.CXX_BOOL_LITERAL_EXPR:
+            # Use tokens if spelling is empty
+            if n.spelling:
+                return n.spelling
+            else:
+                tokens = [t.spelling for t in n.get_tokens()]
+                return ' '.join(tokens) if tokens else None
+        elif n.kind == clang.cindex.CursorKind.UNEXPOSED_EXPR:
             # Get the raw tokens for the expression
-            tokens = [t.spelling for t in child.get_tokens()]
+            tokens = [t.spelling for t in n.get_tokens()]
             if tokens:
-                init_value = ' '.join(tokens)
+                return ' '.join(tokens)
+        elif n.kind == clang.cindex.CursorKind.BINARY_OPERATOR:
+            # Handle binary operations like assignment expressions
+            tokens = [t.spelling for t in n.get_tokens()]
+            if tokens:
+                return ' '.join(tokens)
+        elif n.kind == clang.cindex.CursorKind.UNARY_OPERATOR:
+            # Handle unary operations
+            tokens = [t.spelling for t in n.get_tokens()]
+            if tokens:
+                return ' '.join(tokens)
+        elif n.kind == clang.cindex.CursorKind.CALL_EXPR:
+            # Handle function calls in initialization
+            tokens = [t.spelling for t in n.get_tokens()]
+            if tokens:
+                return ' '.join(tokens)
+        elif n.kind == clang.cindex.CursorKind.DECL_REF_EXPR:
+            # Handle references to other variables/constants
+            tokens = [t.spelling for t in n.get_tokens()]
+            if tokens:
+                return ' '.join(tokens)
+        elif n.kind == clang.cindex.CursorKind.MEMBER_REF_EXPR:
+            # Handle member references
+            tokens = [t.spelling for t in n.get_tokens()]
+            if tokens:
+                return ' '.join(tokens)
+        elif n.kind == clang.cindex.CursorKind.ARRAY_SUBSCRIPT_EXPR:
+            # Handle array subscript expressions
+            tokens = [t.spelling for t in n.get_tokens()]
+            if tokens:
+                return ' '.join(tokens)
+        elif n.kind == clang.cindex.CursorKind.CSTYLE_CAST_EXPR or n.kind == clang.cindex.CursorKind.CXX_STATIC_CAST_EXPR:
+            # Handle casts in initialization
+            tokens = [t.spelling for t in n.get_tokens()]
+            if tokens:
+                return ' '.join(tokens)
+        elif n.kind == clang.cindex.CursorKind.COMPOUND_ASSIGNMENT_OPERATOR or n.kind == clang.cindex.CursorKind.ASSIGNMENT_OPERATOR:
+            # Handle assignment operators - look for the right-hand side value
+            for child in n.get_children():
+                # Skip the left operand (the variable name) and focus on the right operand (the value)
+                value = extract_value_from_node(child)
+                if value is not None:
+                    return value
+        else:
+            # Recursively check children for initialization values
+            for child in n.get_children():
+                value = extract_value_from_node(child)
+                if value is not None:
+                    return value
+        return None
+
+    # Look for initialization value in the children of the variable declaration
+    for child in node.get_children():
+        value = extract_value_from_node(child)
+        if value is not None:
+            init_value = value
+            break
     
     return {
         'kind': 'variable',
@@ -341,23 +423,105 @@ def _handle_cast_operator(self, node) -> Dict[str, Any]:
 def _handle_field(self, node) -> Dict[str, Any]:
     """Handle class field/attribute"""
     init_value = None
-    for child in node.get_children():
-        if child.kind == clang.cindex.CursorKind.INTEGER_LITERAL:
-            init_value = child.spelling
-        elif child.kind == clang.cindex.CursorKind.FLOATING_LITERAL:
-            init_value = child.spelling
-        elif child.kind == clang.cindex.CursorKind.STRING_LITERAL:
-            init_value = child.spelling
-        elif child.kind == clang.cindex.CursorKind.CHARACTER_LITERAL:
-            init_value = child.spelling
-        elif child.kind == clang.cindex.CursorKind.CXX_BOOL_LITERAL_EXPR:
-            init_value = child.spelling
-        elif child.kind == clang.cindex.CursorKind.UNEXPOSED_EXPR:
+    def extract_value_from_node(n):
+        """Recursively extract value from a node and its children"""
+        if n.kind == clang.cindex.CursorKind.INTEGER_LITERAL:
+            # Use tokens if spelling is empty
+            if n.spelling:
+                return n.spelling
+            else:
+                tokens = [t.spelling for t in n.get_tokens()]
+                return ' '.join(tokens) if tokens else None
+        elif n.kind == clang.cindex.CursorKind.FLOATING_LITERAL:
+            # Use tokens if spelling is empty
+            if n.spelling:
+                return n.spelling
+            else:
+                tokens = [t.spelling for t in n.get_tokens()]
+                return ' '.join(tokens) if tokens else None
+        elif n.kind == clang.cindex.CursorKind.STRING_LITERAL:
+            # Use tokens if spelling is empty
+            if n.spelling:
+                return n.spelling
+            else:
+                tokens = [t.spelling for t in n.get_tokens()]
+                return ' '.join(tokens) if tokens else None
+        elif n.kind == clang.cindex.CursorKind.CHARACTER_LITERAL:
+            # Use tokens if spelling is empty
+            if n.spelling:
+                return n.spelling
+            else:
+                tokens = [t.spelling for t in n.get_tokens()]
+                return ' '.join(tokens) if tokens else None
+        elif n.kind == clang.cindex.CursorKind.CXX_BOOL_LITERAL_EXPR:
+            # Use tokens if spelling is empty
+            if n.spelling:
+                return n.spelling
+            else:
+                tokens = [t.spelling for t in n.get_tokens()]
+                return ' '.join(tokens) if tokens else None
+        elif n.kind == clang.cindex.CursorKind.UNEXPOSED_EXPR:
             # Get the raw tokens for the expression
-            tokens = [t.spelling for t in child.get_tokens()]
+            tokens = [t.spelling for t in n.get_tokens()]
             if tokens:
-                init_value = ' '.join(tokens)
-    
+                return ' '.join(tokens)
+        elif n.kind == clang.cindex.CursorKind.BINARY_OPERATOR:
+            # Handle binary operations like assignment expressions
+            tokens = [t.spelling for t in n.get_tokens()]
+            if tokens:
+                return ' '.join(tokens)
+        elif n.kind == clang.cindex.CursorKind.UNARY_OPERATOR:
+            # Handle unary operations
+            tokens = [t.spelling for t in n.get_tokens()]
+            if tokens:
+                return ' '.join(tokens)
+        elif n.kind == clang.cindex.CursorKind.CALL_EXPR:
+            # Handle function calls in initialization
+            tokens = [t.spelling for t in n.get_tokens()]
+            if tokens:
+                return ' '.join(tokens)
+        elif n.kind == clang.cindex.CursorKind.DECL_REF_EXPR:
+            # Handle references to other variables/constants
+            tokens = [t.spelling for t in n.get_tokens()]
+            if tokens:
+                return ' '.join(tokens)
+        elif n.kind == clang.cindex.CursorKind.MEMBER_REF_EXPR:
+            # Handle member references
+            tokens = [t.spelling for t in n.get_tokens()]
+            if tokens:
+                return ' '.join(tokens)
+        elif n.kind == clang.cindex.CursorKind.ARRAY_SUBSCRIPT_EXPR:
+            # Handle array subscript expressions
+            tokens = [t.spelling for t in n.get_tokens()]
+            if tokens:
+                return ' '.join(tokens)
+        elif n.kind == clang.cindex.CursorKind.CSTYLE_CAST_EXPR or n.kind == clang.cindex.CursorKind.CXX_STATIC_CAST_EXPR:
+            # Handle casts in initialization
+            tokens = [t.spelling for t in n.get_tokens()]
+            if tokens:
+                return ' '.join(tokens)
+        elif n.kind == clang.cindex.CursorKind.COMPOUND_ASSIGNMENT_OPERATOR or n.kind == clang.cindex.CursorKind.ASSIGNMENT_OPERATOR:
+            # Handle assignment operators - look for the right-hand side value
+            for child in n.get_children():
+                # Skip the left operand (the variable name) and focus on the right operand (the value)
+                value = extract_value_from_node(child)
+                if value is not None:
+                    return value
+        else:
+            # Recursively check children for initialization values
+            for child in n.get_children():
+                value = extract_value_from_node(child)
+                if value is not None:
+                    return value
+        return None
+
+    # Look for initialization value in the children of the field declaration
+    for child in node.get_children():
+        value = extract_value_from_node(child)
+        if value is not None:
+            init_value = value
+            break
+        
     return {
         'kind': 'field',
         'name': node.spelling,

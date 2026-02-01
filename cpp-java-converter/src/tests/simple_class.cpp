@@ -1,6 +1,7 @@
 class Point {
 private:
-    double x, y;
+    double x = 5.0; 
+    double y = 6.1;
 
 public:
     double getX() const { return x; }
