@@ -84,6 +84,14 @@ def _handle_function_declaration(self, node) -> Dict[str, Any]:
 
 def _handle_variable_declaration(self, node) -> Dict[str, Any]:
     """Handle C++ variable declaration"""
+    array_size = None
+    element_type = None
+    if node.type.kind == clang.cindex.TypeKind.CONSTANTARRAY:
+        array_size = node.type.get_array_size()
+        element_type = node.type.get_array_element_type().spelling
+    elif node.type.kind == clang.cindex.TypeKind.INCOMPLETEARRAY:
+        array_size = None  # Dynamic array (e.g., char[])
+    
     init_value = None
     def extract_value_from_node(n):
         """Recursively extract value from a node and its children"""
@@ -190,6 +198,8 @@ def _handle_variable_declaration(self, node) -> Dict[str, Any]:
         'is_static': node.storage_class == clang.cindex.StorageClass.STATIC,
         'is_const': node.type.is_const_qualified(),
         'init_value': init_value,
+        'array_size': array_size,
+        'element_type': element_type,
         'location': f"{node.location.file}:{node.location.line}"
     }
 

@@ -100,38 +100,42 @@ class CppToJavaConverter:
                 # In flexible mode, return a stub with error comment
                 return f"// TODO: Manual fix required - conversion failed due to: {str(e)}\n// Original code was not converted."
     def _preprocess_cpp_code(self, cpp_code: str) -> str:
-        """
-        Preprocess C++ code to remove includes and other directives that might cause parsing issues
-        """
-
-        # Add forward declarations for common std types to avoid needing includes
-        std_types_definitions = """
-namespace std {
+        """Preprocess C++ code: remove includes but add minimal std declarations for parsing"""
+    
+    # Remove #include directives
+        cpp_code = re.sub(r'^\s*#\s*include\s+[<"][^>"]+[>"].*$', '', cpp_code, flags=re.MULTILINE)
+    
+    # Remove other preprocessor directives
+        cpp_code = re.sub(
+            r'^\s*#\s*(pragma|define|ifdef|ifndef|endif|if|else|elif)\b.*$',
+            '',
+            cpp_code,
+            flags=re.MULTILINE
+        )
+    
+    # ✅ CRITICAL FIX: Minimal but sufficient std declarations for parsing success
+    # These will be SKIPPED during AST conversion - never turned into Java classes
+        std_forward_decls = """
+    namespace std {
+    
     class string {
     public:
         string();
         string(const char*);
         string(const string&);
         ~string();
+        string& operator=(const string&);
+        string& operator=(const char*);
     };
-    template<typename T> class vector {};
+    
     class ostream {};
     extern ostream cout;
     extern ostream cin;
     extern ostream endl;
-}
-"""
-
-        # Remove #include directives
-        cpp_code_without_includes = re.sub(r'^\s*#\s*include\s+[<"][^>"]+[>"]', '', cpp_code, flags=re.MULTILINE)
-
-        # Remove other preprocessor directives but keep the content
-        cpp_code_cleaned = re.sub(r'^\s*#\s*(pragma|define|ifdef|ifndef|endif|if|else|elif)\b.*$', '', cpp_code_without_includes, flags=re.MULTILINE)
-
-        # Combine the std types definitions with the cleaned code
-        final_cpp_code = std_types_definitions + cpp_code_cleaned
-
-        return final_cpp_code.strip()
+    }
+    """
+    
+        return (std_forward_decls + cpp_code).strip()
     
     def _parse_with_libclang(self, cpp_code: str, source_file_path: Optional[str] = None) -> Any:
         """Parse C++ code using libclang and return AST"""
@@ -221,6 +225,34 @@ namespace std {
             raise ValueError("C++ code has compilation errors:\n" + "\n".join(diagnostics))
 
         return True
+    def _is_std_node(self, node) -> bool:
+        """Check if node belongs to std namespace or standard library types"""
+    # Skip std namespace itself
+        if node.kind == clang.cindex.CursorKind.NAMESPACE and node.spelling == "std":
+            return True
+    
+    # Skip children of std namespace (recursively check parents)
+        parent = node.semantic_parent
+        while parent is not None:
+            if parent.kind == clang.cindex.CursorKind.NAMESPACE and parent.spelling == "std":
+                return True
+            if parent.kind == clang.cindex.CursorKind.TRANSLATION_UNIT:
+                break
+            parent = parent.semantic_parent
+    
+    # Skip known standard library symbols even outside std namespace
+        std_symbols = {"string", "basic_string", "ostream", "istream", "cin", "cout", "cerr", "endl"}
+        if node.kind in (clang.cindex.CursorKind.CLASS_DECL,
+                     clang.cindex.CursorKind.STRUCT_DECL,
+                     clang.cindex.CursorKind.VAR_DECL,
+                     clang.cindex.CursorKind.TYPEDEF_DECL,
+                     clang.cindex.CursorKind.FUNCTION_DECL,
+                     clang.cindex.CursorKind.CONSTRUCTOR,
+                     clang.cindex.CursorKind.DESTRUCTOR):
+            if node.spelling.lower() in std_symbols:
+                return True
+    
+        return False
 
     def _transform_ast(self, tu) -> List[Any]:
         """Transform C++ AST to internal representation suitable for Java generation"""
@@ -229,7 +261,9 @@ namespace std {
         def traverse(node, depth=0):
             self.ast_node_count += 1
 
-            # Handle different kinds of declarations
+            if self._is_std_node(node):
+                return
+            
             if node.kind == clang.cindex.CursorKind.CLASS_DECL:
                 java_ast.append(self._handle_class_declaration(node))
             elif node.kind == clang.cindex.CursorKind.FUNCTION_DECL:

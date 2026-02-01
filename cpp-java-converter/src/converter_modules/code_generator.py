@@ -382,21 +382,36 @@ def _generate_constants_class(self, constants: List[str]) -> str:
 
 
 def _generate_java_variable(self, variable_info: Dict[str, Any]) -> str:
-    """Generate Java variable from C++ variable info"""
     access = "public"
     static_keyword = "static " if variable_info.get('is_static', True) else ""
     final_keyword = "final " if variable_info.get('is_const', False) else ""
     java_type = self._cpp_to_java_type(variable_info['type'])
     java_name = self._cpp_name_to_java_name(variable_info['name'])
 
+    array_size = variable_info.get('array_size')
+    if array_size is not None:
+
+        element_type = variable_info.get('element_type', variable_info['type'])
+        if 'char' in element_type.lower():
+            element_java_type = 'byte'
+            java_type = 'byte[]'
+        else:
+            element_java_type = self._cpp_to_java_type(element_type)
+            if not element_java_type.endswith('[]'):
+                java_type = f'{element_java_type}[]'
+            else:
+                java_type = element_java_type
+        
+        return f"    {access} {static_keyword}{final_keyword}{java_type} {java_name} = new {element_java_type}[{array_size}];"
+    
     init_value = variable_info.get('init_value')
     if init_value is not None:
-        # Map C++ literal values to Java equivalents if needed
         java_init_value = self._cpp_literal_to_java(init_value)
         return f"    {access} {static_keyword}{final_keyword}{java_type} {java_name} = {java_init_value};"
-    else:
-        default_value = self._get_default_value(java_type)
-        return f"    {access} {static_keyword}{final_keyword}{java_type} {java_name} = {default_value};"
+    
+    # No initializer - use Java default value
+    default_value = self._get_default_value(java_type)
+    return f"    {access} {static_keyword}{final_keyword}{java_type} {java_name} = {default_value};"
 
 def _cpp_literal_to_java(self, cpp_literal: str) -> str:
     """Convert C++ literal to Java equivalent"""
