@@ -8,13 +8,45 @@ def _cpp_to_java_type(self, cpp_type: str) -> str:
     # Очищаем от const, volatile и т.п.
     clean_type = re.sub(r'\b(const|volatile|mutable|struct|class)\s+', '', cpp_type).strip()
 
+    if clean_type.startswith('std::'):
+        if clean_type.startswith('std::string'):
+            self.java_imports.add("java.lang.String")
+            return 'String'
+        elif clean_type.startswith('std::vector'):
+            self.java_imports.add("java.util.ArrayList")
+            return 'ArrayList'
+        elif clean_type.startswith('std::list'):
+            self.java_imports.add("java.util.LinkedList")
+            return 'LinkedList'
+        elif clean_type.startswith('std::map'):
+            self.java_imports.add("java.util.HashMap")
+            return 'HashMap'
+        elif clean_type.startswith('std::unordered_map'):
+            self.java_imports.add("java.util.HashMap")
+            return 'HashMap'
+        elif clean_type.startswith('std::set'):
+            self.java_imports.add("java.util.HashSet")
+            return 'HashSet'
+        elif clean_type.startswith('std::unordered_set'):
+            self.java_imports.add("java.util.HashSet")
+            return 'HashSet'
+        elif clean_type.startswith('std::shared_ptr'):
+            self.java_imports.add("java.lang.ref.WeakReference")
+            return 'WeakReference'
+        elif clean_type.startswith('std::unique_ptr'):
+            return ''
+
+    if clean_type == 'string':
+        self.java_imports.add("java.lang.String")
+        return 'String'
+    
     cpp_to_java_types = {
         'int': 'int', 'long': 'long', 'short': 'short', 'char': 'byte',
         'wchar_t': 'char', 'bool': 'boolean', 'float': 'float', 'double': 'double',
         'void': 'void', 'unsigned int': 'int', 'unsigned long': 'long',
         'unsigned short': 'short', 'unsigned char': 'byte', 'signed char': 'byte',
         'long long': 'long', 'unsigned long long': 'long',
-        'size_t': 'long', 'std::string': 'String', 'string': 'String'
+        'size_t': 'long'
     }
 
     # Указатели → массивы

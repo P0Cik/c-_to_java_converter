@@ -35,7 +35,7 @@ def main():
     </style>
     """, unsafe_allow_html=True)
     
-    st.title("🔄 Конвертер исходного кода C++ в Java")
+    st.title(" Конвертер исходного кода C++ в Java")
     st.markdown("""
     Этот инструмент преобразует исходный код C++ в код Java с использованием парсинга на основе AST с помощью libclang.
     Он обрабатывает различные конструкции C++, включая классы, шаблоны, паттерны RAII и перегрузку операторов.
@@ -52,7 +52,7 @@ def main():
         st.session_state.cpp_input = ""
     
     # Sidebar for settings
-    st.sidebar.header("⚙️ Настройки")
+    st.sidebar.header(" Настройки")
     conversion_mode = st.sidebar.radio(
         "Режим конвертации:",
         ("strict", "flexible"),
@@ -62,7 +62,7 @@ def main():
     verbose_output = st.sidebar.checkbox("Подробный вывод", value=False)
     
     # Create tabs for input and examples
-    tab1, tab2, tab3 = st.tabs(["📝 Ввод кода", "📚 Примеры", "📋 Отчет о конвертации"])
+    tab1, tab2, tab3 = st.tabs([" Ввод кода", " Примеры", " Отчет о конвертации"])
     
     with tab1:
         # File uploader for C++ files
@@ -213,31 +213,31 @@ public:
                 st.session_state.conversion_report = converter.generate_report()
                 st.session_state.error_message = ""
                 
-                st.success("✅ Конвертация успешно завершена!")
+                st.success(" Конвертация успешно завершена!")
                 
         except Exception as e:
-            st.session_state.error_message = f"❌ Ошибка во время конвертации: {str(e)}"
+            st.session_state.error_message = f" Ошибка во время конвертации: {str(e)}"
             st.session_state.converted_code = ""
             st.session_state.conversion_report = {}
             st.error(st.session_state.error_message)
     
     # Display results if available
     if st.session_state.converted_code:
-        st.subheader("📤 Сконвертированный Java код")
+        st.subheader(" Сконвертированный Java код")
         
         # Show the converted code
         st.code(st.session_state.converted_code, language="java")
         
         # Provide download button
         st.download_button(
-            label="📥 Скачать Java код",
+            label=" Скачать Java код",
             data=st.session_state.converted_code,
             file_name="converted_code.java",
             mime="text/plain"
         )
     
     with tab3:
-        st.subheader("📊 Отчет о конвертации")
+        st.subheader(" Отчет о конвертации")
         
         if st.session_state.conversion_report:
             report = st.session_state.conversion_report
@@ -256,13 +256,13 @@ public:
             
             # Show warnings if any
             if report.get('warnings'):
-                st.warning(f"⚠️ Warnings ({len(report['warnings'])}):")
+                st.warning(f" Warnings ({len(report['warnings'])}):")
                 for warning in report['warnings']:
                     st.text("- " + warning)
             
             # Show errors if any
             if report.get('errors'):
-                st.error(f"❌ Errors ({len(report['errors'])}):")
+                st.error(f" Errors ({len(report['errors'])}):")
                 for error in report['errors']:
                     st.text("- " + error)
             

@@ -84,12 +84,31 @@ def _handle_function_declaration(self, node) -> Dict[str, Any]:
 
 def _handle_variable_declaration(self, node) -> Dict[str, Any]:
     """Handle C++ variable declaration"""
+    init_value = None
+    for child in node.get_children():
+        if child.kind == clang.cindex.CursorKind.INTEGER_LITERAL:
+            init_value = child.spelling
+        elif child.kind == clang.cindex.CursorKind.FLOATING_LITERAL:
+            init_value = child.spelling
+        elif child.kind == clang.cindex.CursorKind.STRING_LITERAL:
+            init_value = child.spelling
+        elif child.kind == clang.cindex.CursorKind.CHARACTER_LITERAL:
+            init_value = child.spelling
+        elif child.kind == clang.cindex.CursorKind.CXX_BOOL_LITERAL_EXPR:
+            init_value = child.spelling
+        elif child.kind == clang.cindex.CursorKind.UNEXPOSED_EXPR:
+            # Get the raw tokens for the expression
+            tokens = [t.spelling for t in child.get_tokens()]
+            if tokens:
+                init_value = ' '.join(tokens)
+    
     return {
         'kind': 'variable',
         'name': node.spelling,
         'type': node.type.spelling,
         'is_static': node.storage_class == clang.cindex.StorageClass.STATIC,
         'is_const': node.type.is_const_qualified(),
+        'init_value': init_value,
         'location': f"{node.location.file}:{node.location.line}"
     }
 
@@ -321,12 +340,31 @@ def _handle_cast_operator(self, node) -> Dict[str, Any]:
 
 def _handle_field(self, node) -> Dict[str, Any]:
     """Handle class field/attribute"""
+    init_value = None
+    for child in node.get_children():
+        if child.kind == clang.cindex.CursorKind.INTEGER_LITERAL:
+            init_value = child.spelling
+        elif child.kind == clang.cindex.CursorKind.FLOATING_LITERAL:
+            init_value = child.spelling
+        elif child.kind == clang.cindex.CursorKind.STRING_LITERAL:
+            init_value = child.spelling
+        elif child.kind == clang.cindex.CursorKind.CHARACTER_LITERAL:
+            init_value = child.spelling
+        elif child.kind == clang.cindex.CursorKind.CXX_BOOL_LITERAL_EXPR:
+            init_value = child.spelling
+        elif child.kind == clang.cindex.CursorKind.UNEXPOSED_EXPR:
+            # Get the raw tokens for the expression
+            tokens = [t.spelling for t in child.get_tokens()]
+            if tokens:
+                init_value = ' '.join(tokens)
+    
     return {
         'kind': 'field',
         'name': node.spelling,
         'type': node.type.spelling,
         'is_static': node.storage_class == clang.cindex.StorageClass.STATIC,
         'is_const': node.type.is_const_qualified(),
+        'init_value': init_value,
         'access': self._get_access_level(node),
         'location': f"{node.location.file}:{node.location.line}"
     }

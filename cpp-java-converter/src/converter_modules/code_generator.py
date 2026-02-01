@@ -5,7 +5,6 @@ from typing import Any, Dict, List
 
 
 def _generate_java_code(self, java_ast: List[Any]) -> str:
-    # 1. Извлекаем package
     package_line = None
     classes = []
     enums = []
@@ -29,16 +28,16 @@ def _generate_java_code(self, java_ast: List[Any]) -> str:
             java_name = self._cpp_name_to_java_name(element['name']).upper()
             constants.append(f"public static final {java_type} {java_name} = {element['value']};")
         elif elem_type == 'variable':
-            constants.append(self._generate_java_variable(element))
+            constants.append(element)
         elif elem_type in ('class_template', 'function_template'):
-            # Генерируем заглушки или предупреждения
+
             other_lines.append(f"// Template '{element['name']}' not fully supported in Java")
         elif elem_type == 'typedef':
             other_lines.append(f"// typedef {element['name']} = {element['underlying_type']};")
         elif elem_type == 'conversion_operator':
             other_lines.append(f"// Conversion operator to {element['target_type']}")
 
-    # 2. Генерируем единый Util-класс для всех функций
+
     for element in java_ast:
         if element.get('kind') in ('function', 'function_template'):
             global_functions.append(element)
@@ -46,22 +45,19 @@ def _generate_java_code(self, java_ast: List[Any]) -> str:
     if global_functions:
         other_lines.append(self._generate_util_class(global_functions))
 
-    # 3. Собираем всё вместе
+
     lines = []
     if package_line:
         lines.append(package_line)
         lines.append("")
 
-    # Импорты (если есть)
     if self.java_imports:
         for imp in sorted(self.java_imports):
             lines.append(f"import {imp};")
         lines.append("")
 
-    # Константы на уровне файла (в Java они должны быть внутри класса!)
     if constants:
-        # Создаём отдельный класс для констант, например Constants
-        const_class = self._generate_constants_class(constants)
+        const_class = self._generate_globals_class(constants)
         classes.insert(0, const_class)
 
     lines.extend(classes)
@@ -74,14 +70,10 @@ def _generate_java_code(self, java_ast: List[Any]) -> str:
 def _generate_java_class(self, class_info: Dict[str, Any]) -> str:
     java_lines = []
 
-    # Determine modifiers
     modifiers = ["public"]
     if class_info.get('is_final', False):
         modifiers.append("final")
-    # Убираем автоматическое добавление 'abstract' – слишком рискованно
-    # elif any(...): ...
 
-    # Handle inheritance and AutoCloseable
     extends_clause = ""
     implements_parts = []
 
@@ -99,7 +91,7 @@ def _generate_java_class(self, class_info: Dict[str, Any]) -> str:
         if java_bases:
             extends_clause = f" extends {java_bases[0]}"
 
-    # Add AutoCloseable if destructor exists
+
     has_destructor = bool(class_info.get('destructors'))
     if has_destructor:
         self.java_imports.add("java.lang.AutoCloseable")
@@ -109,23 +101,28 @@ def _generate_java_class(self, class_info: Dict[str, Any]) -> str:
     if implements_parts:
         implements_clause = f" implements {', '.join(implements_parts)}"
 
-    # Start class declaration
+
     class_name = self._cpp_name_to_java_name(class_info['name'])
     java_lines.append(f"{' '.join(modifiers)} class {class_name}{extends_clause}{implements_clause} {{")
     java_lines.append("")
 
-    # Add fields
+
     for field in class_info.get('members', []):
         access = field.get('access', 'private')
         java_type = self._cpp_to_java_type(field['type'])
         java_name = self._cpp_name_to_java_name(field['name'])
         static_keyword = "static " if field.get('is_static', False) else ""
         final_keyword = "final " if field.get('is_const', False) else ""
-        java_lines.append(f"    {access} {static_keyword}{final_keyword}{java_type} {java_name};")
+        init_value = field.get('init_value')
+        if init_value is not None:
+            java_init_value = self._cpp_literal_to_java(init_value)
+            java_lines.append(f"    {access} {static_keyword}{final_keyword}{java_type} {java_name} = {java_init_value};")
+        else:
+            java_lines.append(f"    {access} {static_keyword}{final_keyword}{java_type} {java_name};")
 
     java_lines.append("")
 
-    # Add constructors
+
     for constructor in class_info.get('constructors', []):
         params = ", ".join([
             f"{self._cpp_to_java_type(p['type'])} {self._cpp_name_to_java_name(p['name'])}"
@@ -136,7 +133,7 @@ def _generate_java_class(self, class_info: Dict[str, Any]) -> str:
         java_lines.append("    }")
         java_lines.append("")
 
-    # Add destructor as close()
+
     if has_destructor:
         java_lines.append("    @Override")
         java_lines.append("    public void close() {")
@@ -144,17 +141,17 @@ def _generate_java_class(self, class_info: Dict[str, Any]) -> str:
         java_lines.append("    }")
         java_lines.append("")
 
-    # Add methods
+
     has_equals = False
     for method in class_info.get('methods', []):
         method_lines = self._generate_java_method(method, class_name)
-        # Check if this is equals
+
         if any("public boolean equals(" in line for line in method_lines):
             has_equals = True
         java_lines.extend(method_lines)
         java_lines.append("")
 
-    # Add hashCode if equals is present
+
     if has_equals:
         java_lines.append("    @Override")
         java_lines.append("    public int hashCode() {")
@@ -169,21 +166,21 @@ def _generate_java_class(self, class_info: Dict[str, Any]) -> str:
 
 def _generate_java_method(self, method_info: Dict[str, Any], class_name: str) -> List[str]:
     """Generate Java method from C++ method info"""
-    # Determine access level
+
     access = method_info.get('access', 'public')
     modifiers = [access]
 
-    # Add @Override if needed
+
     if method_info.get('is_override', False):
         modifiers.insert(0, '@Override')
 
-    # Handle static/final
+
     if method_info.get('is_static', False):
         modifiers.append('static')
     if method_info.get('is_final', False):
         modifiers.append('final')
 
-    # Handle operator overloads
+
     original_name = method_info['name']
     method_name = original_name
     is_equals = False
@@ -198,7 +195,7 @@ def _generate_java_method(self, method_info: Dict[str, Any], class_name: str) ->
             is_hash_code = True
             method_name = 'hashCode'
 
-    # Special handling for equals: enforce correct signature
+   
     if is_equals:
         return_type = 'boolean'
         param_str = 'Object obj'
@@ -206,7 +203,7 @@ def _generate_java_method(self, method_info: Dict[str, Any], class_name: str) ->
             modifiers.insert(0, '@Override')
     else:
         return_type = self._cpp_to_java_type(method_info['return_type'])
-        # Handle parameters normally
+
         params = []
         for param in method_info.get('parameters', []):
             param_type = self._cpp_to_java_type(param['type'])
@@ -214,7 +211,7 @@ def _generate_java_method(self, method_info: Dict[str, Any], class_name: str) ->
             params.append(f"{param_type} {param_name}")
         param_str = ", ".join(params)
 
-    # Generate method
+ 
     java_lines = []
     java_lines.append(f"    {' '.join(modifiers)} {return_type} {method_name}({param_str}) {{")
     java_lines.append("        // Method implementation")
@@ -242,12 +239,12 @@ def _generate_util_class(self, functions: List[Dict[str, Any]]) -> str:
         is_template = func.get('kind') == 'function_template'
 
         if is_template:
-            # Обработка шаблонной функции
+
             template_params = func['template_parameters']
             type_param_names = [p['name'] for p in template_params if not p.get('is_non_type', False)]
             generics_clause = f"<{', '.join(type_param_names)}> " if type_param_names else ""
 
-            # Используем исходную функцию внутри
+
             inner_func = func['function_info']
             access = inner_func.get('access', 'public')
             return_type = self._map_template_type(inner_func['return_type'], template_params)
@@ -267,7 +264,7 @@ def _generate_util_class(self, functions: List[Dict[str, Any]]) -> str:
             lines.append("    }")
 
         else:
-            # Обработка обычной функции
+            
             access = func.get('access', 'public')
             return_type = self._cpp_to_java_type(func['return_type'])
             func_name = self._cpp_name_to_java_name(func['name'])
@@ -284,7 +281,7 @@ def _generate_util_class(self, functions: List[Dict[str, Any]]) -> str:
                 lines.append(f"        return {self._get_default_value(return_type)}; // TODO: Implement")
             lines.append("    }")
 
-        lines.append("")  # Empty line between methods
+        lines.append("")
 
     lines.append("}")
     return '\n'.join(lines)
@@ -304,9 +301,14 @@ def _generate_globals_class(self, variables: List[Dict[str, Any]]) -> str:
         java_type = self._cpp_to_java_type(var['type'])
         java_name = self._cpp_name_to_java_name(var['name'])
 
-        # Добавляем инициализацию по умолчанию
-        default_value = self._get_default_value(java_type)
-        lines.append(f"    {access} {static_keyword}{final_keyword}{java_type} {java_name} = {default_value};")
+
+        init_value = var.get('init_value')
+        if init_value is not None:
+            java_init_value = self._cpp_literal_to_java(init_value)
+            lines.append(f"    {access} {static_keyword}{final_keyword}{java_type} {java_name} = {java_init_value};")
+        else:
+            default_value = self._get_default_value(java_type)
+            lines.append(f"    {access} {static_keyword}{final_keyword}{java_type} {java_name} = {default_value};")
 
     lines.append("}")
     return '\n'.join(lines)
@@ -320,24 +322,24 @@ def _generate_java_enum(self, enum_info: Dict[str, Any]) -> str:
     if not values:
         return f"public enum {enum_name} {{\n    // Empty enum\n}}"
 
-    # Проверяем, есть ли нестандартные значения (требуется тело enum)
+    
     has_custom_values = any(val.get('value', i) != i for i, val in enumerate(values))
 
     lines = [f"public enum {enum_name} {{"]
 
-    # Генерируем значения
+
     value_lines = []
     for i, val in enumerate(values):
         name = val['name'].upper()
         if has_custom_values:
-            # Сохраняем оригинальное значение
+
             value = val.get('value', i)
             value_lines.append(f"    {name}({value})")
         else:
             value_lines.append(f"    {name}")
 
     if has_custom_values:
-        # Добавляем конструктор и поле
+
         lines.extend(value_lines)
         lines.append("    ;")
         lines.append("")
@@ -351,7 +353,7 @@ def _generate_java_enum(self, enum_info: Dict[str, Any]) -> str:
         lines.append("        return value;")
         lines.append("    }")
     else:
-        # Простой enum без тела
+
         lines.append(", ".join(v.strip() for v in value_lines) + "")
 
     lines.append("}")
@@ -387,4 +389,24 @@ def _generate_java_variable(self, variable_info: Dict[str, Any]) -> str:
     java_type = self._cpp_to_java_type(variable_info['type'])
     java_name = self._cpp_name_to_java_name(variable_info['name'])
 
-    return f"    {access} {static_keyword}{final_keyword}{java_type} {java_name};"
+    init_value = variable_info.get('init_value')
+    if init_value is not None:
+        # Map C++ literal values to Java equivalents if needed
+        java_init_value = self._cpp_literal_to_java(init_value)
+        return f"    {access} {static_keyword}{final_keyword}{java_type} {java_name} = {java_init_value};"
+    else:
+        default_value = self._get_default_value(java_type)
+        return f"    {access} {static_keyword}{final_keyword}{java_type} {java_name} = {default_value};"
+
+def _cpp_literal_to_java(self, cpp_literal: str) -> str:
+    """Convert C++ literal to Java equivalent"""
+    
+    if cpp_literal.startswith('"') and cpp_literal.endswith('"'):
+        return cpp_literal  
+    elif cpp_literal.startswith("'") and cpp_literal.endswith("'"):
+        return cpp_literal
+    elif cpp_literal.lower() in ('true', 'false'):
+        return cpp_literal.lower()  
+    else:
+        
+        return cpp_literal
