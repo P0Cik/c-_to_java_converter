@@ -4,6 +4,7 @@ import json
 from typing import Any, Dict, List, Optional
 import tempfile
 import logging
+import subprocess
 from datetime import datetime
 import time
 
@@ -63,7 +64,10 @@ class CppToJavaConverter:
 
         try:
             # Parse C++ code using libclang
-            ast = self._parse_with_libclang(cpp_code, source_file_path)
+            processed_cpp_code = self._preprocess_cpp_code(cpp_code)
+
+            # Parse C++ code using libclang
+            ast = self._parse_with_libclang(processed_cpp_code, source_file_path)
 
             # Transform AST to Java representation
             java_ast = self._transform_ast(ast)
@@ -95,10 +99,44 @@ class CppToJavaConverter:
             else:
                 # In flexible mode, return a stub with error comment
                 return f"// TODO: Manual fix required - conversion failed due to: {str(e)}\n// Original code was not converted."
+    def _preprocess_cpp_code(self, cpp_code: str) -> str:
+        """
+        Preprocess C++ code to remove includes and other directives that might cause parsing issues
+        """
 
+        # Add forward declarations for common std types to avoid needing includes
+        std_types_definitions = """
+namespace std {
+    class string {
+    public:
+        string();
+        string(const char*);
+        string(const string&);
+        ~string();
+    };
+    template<typename T> class vector {};
+    class ostream {};
+    extern ostream cout;
+    extern ostream cin;
+    extern ostream endl;
+}
+"""
+
+        # Remove #include directives
+        cpp_code_without_includes = re.sub(r'^\s*#\s*include\s+[<"][^>"]+[>"]', '', cpp_code, flags=re.MULTILINE)
+
+        # Remove other preprocessor directives but keep the content
+        cpp_code_cleaned = re.sub(r'^\s*#\s*(pragma|define|ifdef|ifndef|endif|if|else|elif)\b.*$', '', cpp_code_without_includes, flags=re.MULTILINE)
+
+        # Combine the std types definitions with the cleaned code
+        final_cpp_code = std_types_definitions + cpp_code_cleaned
+
+        return final_cpp_code.strip()
+    
     def _parse_with_libclang(self, cpp_code: str, source_file_path: Optional[str] = None) -> Any:
         """Parse C++ code using libclang and return AST"""
         # Write temporary file for libclang to parse
+        import os
 
         if source_file_path is None:
             with tempfile.NamedTemporaryFile(mode='w', suffix='.cpp', delete=False) as temp_file:
@@ -111,8 +149,48 @@ class CppToJavaConverter:
             # Create index and translation unit
             index = clang.cindex.Index.create()
 
-            # Parse with standard C++17
-            args = ['-std=c++17', '-I/usr/include/c++/v1', '-I/usr/include']  # Common include paths
+            # Try to detect system include paths
+            cpp_include_paths = ['-std=c++17']
+
+            # Add common C++ standard library include paths
+            common_paths = [
+                '/usr/include/c++/v1',      # libc++
+                '/usr/include/c++/11',      # GCC libstdc++
+                '/usr/include/c++/12',      # GCC libstdc++
+                '/usr/include/c++/13',      # GCC libstdc++
+                '/usr/include/c++/14',      # GCC libstdc++
+                '/usr/include',             # System headers
+                '/usr/local/include',       # Local headers
+                '/opt/homebrew/include'     # Homebrew on macOS
+            ]
+
+            # Add paths that actually exist
+            for path in common_paths:
+                if os.path.exists(path):
+                    cpp_include_paths.append(f'-I{path}')
+
+            # Try to get compiler's default include paths
+            try:
+                result = subprocess.run(['cpp', '-v', '/dev/null', '-o', '/dev/null'],
+                                      capture_output=True, text=True, check=False)
+                if result.stderr:
+                    import re
+                    # Look for include paths in preprocessor output
+                    in_includes = False
+                    for line in result.stderr.split('\n'):
+                        if '#include <...> search starts here:' in line:
+                            in_includes = True
+                            continue
+                        elif 'End of search list.' in line:
+                            break
+                        elif in_includes:
+                            inc_path = line.strip()
+                            if inc_path and os.path.exists(inc_path):
+                                cpp_include_paths.append(f'-I{inc_path}')
+            except:
+                pass  # If cpp command is not available, continue with common paths
+
+            args = cpp_include_paths
 
             tu = index.parse(temp_filename, args=args)
 

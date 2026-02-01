@@ -10,7 +10,6 @@ def _cpp_to_java_type(self, cpp_type: str) -> str:
 
     if clean_type.startswith('std::'):
         if clean_type.startswith('std::string'):
-            self.java_imports.add("java.lang.String")
             return 'String'
         elif clean_type.startswith('std::vector'):
             self.java_imports.add("java.util.ArrayList")
@@ -37,7 +36,6 @@ def _cpp_to_java_type(self, cpp_type: str) -> str:
             return ''
 
     if clean_type == 'string':
-        self.java_imports.add("java.lang.String")
         return 'String'
     
     cpp_to_java_types = {

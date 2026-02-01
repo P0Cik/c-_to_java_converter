@@ -1,11 +1,11 @@
-#include <string>  // ← добавь это
+#include <string>
 
 namespace Geometry {
     namespace Shapes {
 
         class Shape {
         protected:
-            std::string name;  // ← std::
+            std::string name;
 
         public:
             Shape(const std::string& n) : name(n) {}

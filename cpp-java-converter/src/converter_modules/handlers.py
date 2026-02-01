@@ -162,8 +162,7 @@ def _handle_variable_declaration(self, node) -> Dict[str, Any]:
             tokens = [t.spelling for t in n.get_tokens()]
             if tokens:
                 return ' '.join(tokens)
-        elif n.kind == clang.cindex.CursorKind.COMPOUND_ASSIGNMENT_OPERATOR or n.kind == clang.cindex.CursorKind.ASSIGNMENT_OPERATOR:
-            # Handle assignment operators - look for the right-hand side value
+        elif n.kind == clang.cindex.CursorKind.COMPOUND_ASSIGNMENT_OPERATOR or (hasattr(clang.cindex.CursorKind, 'ASSIGNMENT_OPERATOR') and n.kind == clang.cindex.CursorKind.ASSIGNMENT_OPERATOR):
             for child in n.get_children():
                 # Skip the left operand (the variable name) and focus on the right operand (the value)
                 value = extract_value_from_node(child)
@@ -500,8 +499,7 @@ def _handle_field(self, node) -> Dict[str, Any]:
             tokens = [t.spelling for t in n.get_tokens()]
             if tokens:
                 return ' '.join(tokens)
-        elif n.kind == clang.cindex.CursorKind.COMPOUND_ASSIGNMENT_OPERATOR or n.kind == clang.cindex.CursorKind.ASSIGNMENT_OPERATOR:
-            # Handle assignment operators - look for the right-hand side value
+        elif n.kind == clang.cindex.CursorKind.COMPOUND_ASSIGNMENT_OPERATOR or (hasattr(clang.cindex.CursorKind, 'ASSIGNMENT_OPERATOR') and n.kind == clang.cindex.CursorKind.ASSIGNMENT_OPERATOR):
             for child in n.get_children():
                 # Skip the left operand (the variable name) and focus on the right operand (the value)
                 value = extract_value_from_node(child)
@@ -521,7 +519,7 @@ def _handle_field(self, node) -> Dict[str, Any]:
         if value is not None:
             init_value = value
             break
-        
+
     return {
         'kind': 'field',
         'name': node.spelling,

@@ -402,7 +402,8 @@ def _cpp_literal_to_java(self, cpp_literal: str) -> str:
     """Convert C++ literal to Java equivalent"""
     
     if cpp_literal.startswith('"') and cpp_literal.endswith('"'):
-        return cpp_literal  
+        inner_content = cpp_literal[1:-1]
+        return f'"{inner_content}"'  
     elif cpp_literal.startswith("'") and cpp_literal.endswith("'"):
         return cpp_literal
     elif cpp_literal.lower() in ('true', 'false'):
