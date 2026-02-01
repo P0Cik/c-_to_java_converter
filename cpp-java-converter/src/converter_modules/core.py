@@ -346,6 +346,10 @@ class CppToJavaConverter:
         """Convert C++ type to Java type"""
         from .type_mapper import _cpp_to_java_type
         return _cpp_to_java_type(self, cpp_type)
+    
+    def _cpp_literal_to_java(self, cpp_literal: str) -> str:
+        from .code_generator import _cpp_literal_to_java
+        return _cpp_literal_to_java(self, cpp_literal)
 
 
     JAVA_RESERVED_WORDS = {
