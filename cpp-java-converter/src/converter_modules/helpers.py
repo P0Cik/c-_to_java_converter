@@ -87,15 +87,18 @@ def _cpp_name_to_java_name(self, cpp_name: str, naming_convention: str = "camelC
     if cpp_name.lower() in self.JAVA_RESERVED_LOWER:
         return f"_{cpp_name}"
 
-    parts = [part for part in cpp_name.replace('-', '_').split('_') if part]
+    if '_' not in cpp_name and '-' not in cpp_name:
+        java_name = cpp_name
+    else:
+        parts = [part for part in cpp_name.replace('-', '_').split('_') if part]
 
-    if not parts:
-        return "_unnamed"
+        if not parts:
+            return "_unnamed"
 
-    if naming_convention == "PascalCase":
-        java_name = ''.join(part.capitalize() for part in parts)
-    else:  
-        java_name = parts[0].lower() + ''.join(part.capitalize() for part in parts[1:])
+        if naming_convention == "PascalCase":
+            java_name = ''.join(part.capitalize() for part in parts)
+        else:  
+            java_name = parts[0].lower() + ''.join(part.capitalize() for part in parts[1:])
 
     if not (java_name[0].isalpha() or java_name[0] == '_'):
         java_name = '_' + java_name

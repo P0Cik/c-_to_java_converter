@@ -63,22 +63,16 @@ class CppToJavaConverter:
         self.ast_node_count = 0
 
         try:
-            # Parse C++ code using libclang
             processed_cpp_code = self._preprocess_cpp_code(cpp_code)
 
-            # Parse C++ code using libclang
             ast = self._parse_with_libclang(processed_cpp_code, source_file_path)
 
-            # Transform AST to Java representation
             java_ast = self._transform_ast(ast)
 
-            # Generate Java code from transformed AST
             java_code = self._generate_java_code(java_ast)
 
-            # Generate imports section
             imports_section = self._generate_imports()
 
-            # Combine imports and main code
             full_java_code = imports_section + java_code
 
             # Record statistics
@@ -97,15 +91,13 @@ class CppToJavaConverter:
             if self.mode == "strict":
                 raise
             else:
-                # In flexible mode, return a stub with error comment
                 return f"// TODO: Manual fix required - conversion failed due to: {str(e)}\n// Original code was not converted."
+            
     def _preprocess_cpp_code(self, cpp_code: str) -> str:
         """Preprocess C++ code: remove includes but add minimal std declarations for parsing"""
     
-    # Remove #include directives
         cpp_code = re.sub(r'^\s*#\s*include\s+[<"][^>"]+[>"].*$', '', cpp_code, flags=re.MULTILINE)
     
-    # Remove other preprocessor directives
         cpp_code = re.sub(
             r'^\s*#\s*(pragma|define|ifdef|ifndef|endif|if|else|elif)\b.*$',
             '',
@@ -113,8 +105,6 @@ class CppToJavaConverter:
             flags=re.MULTILINE
         )
     
-    # ✅ CRITICAL FIX: Minimal but sufficient std declarations for parsing success
-    # These will be SKIPPED during AST conversion - never turned into Java classes
         std_forward_decls = """
     namespace std {
     
@@ -126,12 +116,25 @@ class CppToJavaConverter:
         ~string();
         string& operator=(const string&);
         string& operator=(const char*);
+        bool operator==(const string&) const;
+        bool operator!=(const string&) const;
+        string operator+(const string&) const;
     };
     
-    class ostream {};
+    class ostream {
+    public:
+        template<typename T>
+        ostream& operator<<(const T&);
+        ostream& operator<<(ostream& (*)(ostream&));
+    };
+    class istream {
+    public:
+        template<typename T>
+        istream& operator>>(T&);
+    };
     extern ostream cout;
-    extern ostream cin;
-    extern ostream endl;
+    extern istream cin;
+    extern ostream endl(ostream&);
     }
     """
     
@@ -139,7 +142,6 @@ class CppToJavaConverter:
     
     def _parse_with_libclang(self, cpp_code: str, source_file_path: Optional[str] = None) -> Any:
         """Parse C++ code using libclang and return AST"""
-        # Write temporary file for libclang to parse
         import os
 
         if source_file_path is None:
@@ -150,13 +152,12 @@ class CppToJavaConverter:
             temp_filename = source_file_path  # Use provided path if available
 
         try:
-            # Create index and translation unit
             index = clang.cindex.Index.create()
 
-            # Try to detect system include paths
+            
             cpp_include_paths = ['-std=c++17']
 
-            # Add common C++ standard library include paths
+            
             common_paths = [
                 '/usr/include/c++/v1',      # libc++
                 '/usr/include/c++/11',      # GCC libstdc++
@@ -168,12 +169,10 @@ class CppToJavaConverter:
                 '/opt/homebrew/include'     # Homebrew on macOS
             ]
 
-            # Add paths that actually exist
             for path in common_paths:
                 if os.path.exists(path):
                     cpp_include_paths.append(f'-I{path}')
 
-            # Try to get compiler's default include paths
             try:
                 result = subprocess.run(['cpp', '-v', '/dev/null', '-o', '/dev/null'],
                                       capture_output=True, text=True, check=False)
@@ -192,7 +191,7 @@ class CppToJavaConverter:
                             if inc_path and os.path.exists(inc_path):
                                 cpp_include_paths.append(f'-I{inc_path}')
             except:
-                pass  # If cpp command is not available, continue with common paths
+                pass 
 
             args = cpp_include_paths
 
@@ -201,13 +200,11 @@ class CppToJavaConverter:
             if not tu.cursor:
                 raise ValueError("Failed to parse C++ code - invalid syntax")
 
-            # Validate AST
             self._validate_ast(tu)
 
             return tu
 
         finally:
-            # Clean up temp file if we created one
             if source_file_path is None:
                 import os
                 os.unlink(temp_filename)
@@ -227,11 +224,9 @@ class CppToJavaConverter:
         return True
     def _is_std_node(self, node) -> bool:
         """Check if node belongs to std namespace or standard library types"""
-    # Skip std namespace itself
         if node.kind == clang.cindex.CursorKind.NAMESPACE and node.spelling == "std":
             return True
     
-    # Skip children of std namespace (recursively check parents)
         parent = node.semantic_parent
         while parent is not None:
             if parent.kind == clang.cindex.CursorKind.NAMESPACE and parent.spelling == "std":
@@ -240,7 +235,6 @@ class CppToJavaConverter:
                 break
             parent = parent.semantic_parent
     
-    # Skip known standard library symbols even outside std namespace
         std_symbols = {"string", "basic_string", "ostream", "istream", "cin", "cout", "cerr", "endl"}
         if node.kind in (clang.cindex.CursorKind.CLASS_DECL,
                      clang.cindex.CursorKind.STRUCT_DECL,
@@ -264,7 +258,10 @@ class CppToJavaConverter:
             if self._is_std_node(node):
                 return
             
-            if node.kind == clang.cindex.CursorKind.CLASS_DECL:
+            handled = True
+            if node.kind == clang.cindex.CursorKind.TRANSLATION_UNIT:
+                handled = False # Must traverse
+            elif node.kind == clang.cindex.CursorKind.CLASS_DECL:
                 java_ast.append(self._handle_class_declaration(node))
             elif node.kind == clang.cindex.CursorKind.FUNCTION_DECL:
                 java_ast.append(self._handle_function_declaration(node))
@@ -292,14 +289,18 @@ class CppToJavaConverter:
                 java_ast.append(self._handle_function_template(node))
             elif node.kind == clang.cindex.CursorKind.CONVERSION_FUNCTION:
                 java_ast.append(self._handle_conversion_function(node))
+            elif node.kind == clang.cindex.CursorKind.UNEXPOSED_DECL:
+                handled = False
             else:
+                handled = False
                 # Log unhandled node types for debugging
                 if self.verbose:
                     self.logger.debug(f"Unhandled node kind: {node.kind}, spelling: {node.spelling}")
 
-            # Continue traversal for children
-            for child in node.get_children():
-                traverse(child, depth + 1)
+            if not handled:
+                # Continue traversal for children ONLY if this wasn't a fully managed construct like a class/function
+                for child in node.get_children():
+                    traverse(child, depth + 1)
 
         traverse(tu.cursor)
         return java_ast
@@ -411,15 +412,71 @@ class CppToJavaConverter:
         from .code_generator import _generate_java_class
         return _generate_java_class(self, class_info)
 
+    def _generate_main_class(self, main_func: Dict[str, Any]) -> str:
+        from .code_generator import _generate_main_class
+        return _generate_main_class(self, main_func)
+
     def _generate_java_method(self, method_info: Dict[str, Any], class_name: str) -> List[str]:
         """Generate Java method from C++ method info"""
         from .code_generator import _generate_java_method
         return _generate_java_method(self, method_info, class_name)
 
+    def _generate_block(self, block: Dict[str, Any], indent_level: int = 2) -> str:
+        from .code_generator import _generate_block
+        return _generate_block(self, block, indent_level)
+
+    def _generate_statement(self, stmt: Dict[str, Any], indent_level: int = 2) -> str:
+        from .code_generator import _generate_statement
+        return _generate_statement(self, stmt, indent_level)
+
+    def _generate_expression(self, expr: Dict[str, Any]) -> str:
+        from .code_generator import _generate_expression
+        return _generate_expression(self, expr)
+
     def _get_default_value(self, java_type: str) -> str:
         """Get default return value for a Java type"""
         from .helpers import _get_default_value
         return _get_default_value(self, java_type)
+
+    def _handle_compound_statement(self, node) -> Dict[str, Any]:
+        from .handlers import _handle_compound_statement
+        return _handle_compound_statement(self, node)
+
+    def _handle_statement(self, node) -> Dict[str, Any]:
+        from .handlers import _handle_statement
+        return _handle_statement(self, node)
+
+    def _handle_expression(self, node) -> Dict[str, Any]:
+        from .handlers import _handle_expression
+        return _handle_expression(self, node)
+
+    def _handle_if_statement(self, node) -> Dict[str, Any]:
+        from .handlers import _handle_if_statement
+        return _handle_if_statement(self, node)
+
+    def _handle_for_statement(self, node) -> Dict[str, Any]:
+        from .handlers import _handle_for_statement
+        return _handle_for_statement(self, node)
+
+    def _handle_while_statement(self, node) -> Dict[str, Any]:
+        from .handlers import _handle_while_statement
+        return _handle_while_statement(self, node)
+
+    def _handle_do_statement(self, node) -> Dict[str, Any]:
+        from .handlers import _handle_do_statement
+        return _handle_do_statement(self, node)
+
+    def _handle_return_statement(self, node) -> Dict[str, Any]:
+        from .handlers import _handle_return_statement
+        return _handle_return_statement(self, node)
+
+    def _handle_decl_statement(self, node) -> Dict[str, Any]:
+        from .handlers import _handle_decl_statement
+        return _handle_decl_statement(self, node)
+
+    def _handle_expression_statement(self, node) -> Dict[str, Any]:
+        from .handlers import _handle_expression_statement
+        return _handle_expression_statement(self, node)
 
 
     def _map_template_type(self, cpp_type: str, template_params: List[Dict[str, Any]]) -> str:

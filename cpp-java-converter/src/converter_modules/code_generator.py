@@ -21,8 +21,11 @@ def _generate_java_code(self, java_ast: List[Any]) -> str:
             classes.append(self._generate_java_class(element))
         elif elem_type == 'enum':
             enums.append(self._generate_java_enum(element))
-        elif elem_type == 'function':
-            global_functions.append(element)
+        elif elem_type in ('function', 'function_template'):
+            if element.get('name') == 'main':
+                classes.append(self._generate_main_class(element))
+            else:
+                global_functions.append(element)
         elif elem_type == 'macro_constant':
             java_type = self._cpp_to_java_type(element.get('underlying_type', 'int'))
             java_name = self._cpp_name_to_java_name(element['name']).upper()
@@ -36,11 +39,6 @@ def _generate_java_code(self, java_ast: List[Any]) -> str:
             other_lines.append(f"// typedef {element['name']} = {element['underlying_type']};")
         elif elem_type == 'conversion_operator':
             other_lines.append(f"// Conversion operator to {element['target_type']}")
-
-
-    for element in java_ast:
-        if element.get('kind') in ('function', 'function_template'):
-            global_functions.append(element)
 
     if global_functions:
         other_lines.append(self._generate_util_class(global_functions))
@@ -69,8 +67,9 @@ def _generate_java_code(self, java_ast: List[Any]) -> str:
 
 def _generate_java_class(self, class_info: Dict[str, Any]) -> str:
     java_lines = []
-
-    modifiers = ["public"]
+    modifiers = []
+    if class_info.get('is_abstract', False):
+        modifiers.append("abstract")
     if class_info.get('is_final', False):
         modifiers.append("final")
 
@@ -128,17 +127,23 @@ def _generate_java_class(self, class_info: Dict[str, Any]) -> str:
             f"{self._cpp_to_java_type(p['type'])} {self._cpp_name_to_java_name(p['name'])}"
             for p in constructor.get('parameters', [])
         ])
-        java_lines.append(f"    public {class_name}({params}) {{")
-        java_lines.append("        // Constructor implementation")
-        java_lines.append("    }")
+        if constructor.get('body'):
+            body_code = self._generate_block(constructor['body'], 1)
+            java_lines.append(f"    public {class_name}({params}) {body_code}")
+        else:
+            java_lines.append(f"    public {class_name}({params}) {{")
+            java_lines.append("    }")
         java_lines.append("")
 
 
     if has_destructor:
         java_lines.append("    @Override")
-        java_lines.append("    public void close() {")
-        java_lines.append("        // Emulated destructor")
-        java_lines.append("    }")
+        if class_info['destructors'][0].get('body'):
+            body_code = self._generate_block(class_info['destructors'][0]['body'], 1)
+            java_lines.append(f"    public void close() {body_code}")
+        else:
+            java_lines.append("    public void close() {")
+            java_lines.append("    }")
         java_lines.append("")
 
 
@@ -163,6 +168,21 @@ def _generate_java_class(self, class_info: Dict[str, Any]) -> str:
     java_lines.append("}")
     return '\n'.join(java_lines)
 
+def _generate_main_class(self, main_func: Dict[str, Any]) -> str:
+    """Generate Java Main class from C++ main function"""
+    lines = ["public class Main {"]
+    
+    if main_func.get('body'):
+        body_str = self._generate_block(main_func['body'], 1)
+        # Replace 'return 0;' with 'return;' since Java main is void
+        body_str = body_str.replace("return 0;", "return;")
+        lines.append(f"    public static void main(String[] args) {body_str}")
+    else:
+        lines.append("    public static void main(String[] args) {}")
+        
+    lines.append("}")
+    return '\n'.join(lines)
+
 
 def _generate_java_method(self, method_info: Dict[str, Any], class_name: str) -> List[str]:
     """Generate Java method from C++ method info"""
@@ -179,6 +199,8 @@ def _generate_java_method(self, method_info: Dict[str, Any], class_name: str) ->
         modifiers.append('static')
     if method_info.get('is_final', False):
         modifiers.append('final')
+    if method_info.get('is_pure_virtual', False):
+        modifiers.append('abstract')
 
 
     original_name = method_info['name']
@@ -213,18 +235,26 @@ def _generate_java_method(self, method_info: Dict[str, Any], class_name: str) ->
 
  
     java_lines = []
-    java_lines.append(f"    {' '.join(modifiers)} {return_type} {method_name}({param_str}) {{")
-    java_lines.append("        // Method implementation")
-
-    if is_equals:
+    
+    if is_equals and method_info.get('body') is None:
+        java_lines.append(f"    {' '.join(modifiers)} {return_type} {method_name}({param_str}) {{")
         java_lines.append("        if (this == obj) return true;")
         java_lines.append("        if (obj == null || getClass() != obj.getClass()) return false;")
         java_lines.append("        // TODO: Compare relevant fields")
         java_lines.append("        return true;")
-    elif return_type != 'void':
-        java_lines.append(f"        return {self._get_default_value(return_type)}; // TODO: Implement")
+        java_lines.append("    }")
+    elif method_info.get('is_pure_virtual', False):
+        java_lines.append(f"    {' '.join(modifiers)} {return_type} {method_name}({param_str});")
+    else:
+        if method_info.get('body'):
+            body_code = self._generate_block(method_info['body'], 1)
+            java_lines.append(f"    {' '.join(modifiers)} {return_type} {method_name}({param_str}) {body_code}")
+        else:
+            java_lines.append(f"    {' '.join(modifiers)} {return_type} {method_name}({param_str}) {{")
+            if return_type != 'void' and return_type:
+                java_lines.append(f"        return {self._get_default_value(return_type)}; // TODO: Implement")
+            java_lines.append("    }")
 
-    java_lines.append("    }")
     return java_lines
 
 
@@ -233,7 +263,7 @@ def _generate_util_class(self, functions: List[Dict[str, Any]]) -> str:
     if not functions:
         return ""
 
-    lines = ["public class Util {"]
+    lines = ["class Util {"]
 
     for func in functions:
         is_template = func.get('kind') == 'function_template'
@@ -287,14 +317,18 @@ def _generate_util_class(self, functions: List[Dict[str, Any]]) -> str:
     return '\n'.join(lines)
 
 
-def _generate_globals_class(self, variables: List[Dict[str, Any]]) -> str:
+def _generate_globals_class(self, variables: List[Any]) -> str:
     """Generate a class containing all global variables as static fields"""
     if not variables:
         return ""
 
-    lines = ["public class Globals {"]
+    lines = ["class Globals {"]
 
     for var in variables:
+        if isinstance(var, str):
+            lines.append(f"    {var}")
+            continue
+            
         access = 'public'
         static_keyword = "static " if var.get('is_static', True) else ""
         final_keyword = "final " if var.get('is_const', False) else ""
@@ -412,6 +446,190 @@ def _generate_java_variable(self, variable_info: Dict[str, Any]) -> str:
     # No initializer - use Java default value
     default_value = self._get_default_value(java_type)
     return f"    {access} {static_keyword}{final_keyword}{java_type} {java_name} = {default_value};"
+
+def _generate_statement(self, stmt: Dict[str, Any], indent_level: int = 2) -> str:
+    """Генерация кода для одного оператора с правильным отступом"""
+    indent = "    " * indent_level
+    
+    if stmt['kind'] == 'if_stmt':
+        condition = self._generate_expression(stmt['condition'])
+        then_body = self._generate_block(stmt['then_body'], indent_level)
+        
+        code = f"{indent}if ({condition}) {then_body}"
+        
+        if stmt.get('else_body'):
+            else_body = self._generate_block(stmt['else_body'], indent_level)
+            # Проверка на вложенный if-else для правильного форматирования
+            if stmt['else_body'].get('kind') == 'if_stmt':
+                code += f" else {else_body}"
+            else:
+                code += f"\n{indent}else {else_body}"
+        return code
+    
+    elif stmt['kind'] == 'for_stmt':
+        init = self._generate_expression(stmt['init']) if stmt.get('init') else ""
+        condition = self._generate_expression(stmt['condition']) if stmt.get('condition') else "true"
+        increment = self._generate_expression(stmt['increment']) if stmt.get('increment') else ""
+        
+        # Форматирование: for (init; condition; increment) { body }
+        header = f"for ({init}; {condition}; {increment})"
+        body = self._generate_block(stmt['body'], indent_level)
+        return f"{indent}{header} {body}"
+    
+    elif stmt['kind'] == 'while_stmt':
+        condition = self._generate_expression(stmt['condition'])
+        body = self._generate_block(stmt['body'], indent_level)
+        return f"{indent}while ({condition}) {body}"
+    
+    elif stmt['kind'] == 'do_stmt':
+        body = self._generate_block(stmt['body'], indent_level)
+        condition = self._generate_expression(stmt['condition'])
+        # do-while в Java требует точки с запятой после условия
+        return f"{indent}do {body}\n{indent}while ({condition});"
+    
+    elif stmt['kind'] == 'return_stmt':
+        value = self._generate_expression(stmt['value']) if stmt.get('value') else ""
+        return f"{indent}return {value};"
+    
+    elif stmt['kind'] == 'compound_stmt':
+        return self._generate_block(stmt, indent_level)
+    
+    elif stmt['kind'] == 'decl_stmt':
+        # Объявление локальной переменной
+        var_type = self._cpp_to_java_type(stmt['type'])
+        var_name = self._cpp_name_to_java_name(stmt['name'])
+        
+        array_size = stmt.get('array_size')
+        if array_size is not None:
+            elem_type = stmt.get('element_type') or "int"
+            java_elem_type = self._cpp_to_java_type(elem_type)
+            if not java_elem_type.endswith('[]'):
+                var_type = f"{java_elem_type}[]"
+            else:
+                var_type = java_elem_type
+            
+            init = f" = new {java_elem_type}[{array_size}]"
+            return f"{indent}{var_type} {var_name}{init};"
+
+        init_val = stmt.get('init_value')
+        if init_val is not None:
+            if isinstance(init_val, dict):
+                java_init = self._generate_expression(init_val)
+            else:
+                java_init = self._cpp_literal_to_java(str(init_val))
+            init = f" = {java_init}"
+        else:
+            init = ""
+
+        return f"{indent}{var_type} {var_name}{init};"
+    
+    elif stmt['kind'] == 'expr_stmt':
+        expr = self._generate_expression(stmt['expression'])
+        return f"{indent}{expr};"
+    
+    else:
+        return f"{indent}// TODO: Unsupported statement type: {stmt['kind']}"
+
+def _generate_block(self, block: Dict[str, Any], indent_level: int = 2) -> str:
+    """Генерация блока кода { ... } с правильной индентацией"""
+    if not block or block.get('kind') != 'compound_stmt':
+        # Если нет блока — оборачиваем в {}
+        inner = self._generate_statement(block, indent_level + 1) if block else f"{'    ' * (indent_level + 1)}// empty"
+        return f"{{\n{inner}\n{'    ' * indent_level}}}"
+    
+    statements = block.get('statements', [])
+    if not statements:
+        return "{\n" + "    " * indent_level + "}"
+    
+    inner_lines = []
+    for stmt in statements:
+        inner_lines.append(self._generate_statement(stmt, indent_level + 1))
+    
+    inner = "\n".join(inner_lines)
+    return f"{{\n{inner}\n{'    ' * indent_level}}}"
+
+def _generate_expression(self, expr: Dict[str, Any]) -> str:
+    """Генерация выражения с рекурсивной обработкой подвыражений"""
+    if not expr:
+        return ""
+        
+    if isinstance(expr, str):
+        return self._cpp_literal_to_java(expr)
+    
+    kind = expr.get('kind', '')
+    
+    if kind == 'literal':
+        return expr['value']
+    
+    elif kind == 'identifier':
+        return self._cpp_name_to_java_name(expr['name'])
+    
+    elif kind == 'binary_op':
+        left = self._generate_expression(expr['left'])
+        right = self._generate_expression(expr['right'])
+        return f"{left} {expr['op']} {right}"
+    
+    elif kind == 'unary_op':
+        operand = self._generate_expression(expr['operand'])
+        # Особый случай: ! для булевых значений
+        if expr['op'] == '!':
+            return f"!{operand}"
+        # Инкремент/декремент
+        elif expr['op'] in ('++', '--'):
+            return f"{expr['op']}{operand}"  # prefix
+        else:
+            return f"{expr['op']}{operand}"
+    
+    elif kind == 'constructor_call':
+        class_type = self._cpp_to_java_type(expr.get('type', ''))
+        args = ", ".join(self._generate_expression(arg) for arg in expr.get('arguments', []))
+        if class_type == "String" and len(expr.get('arguments', [])) == 1:
+            return self._generate_expression(expr.get('arguments', [])[0])
+        return f"new {class_type}({args})"
+
+    elif kind == 'call':
+        callee_orig = expr.get('callee_orig', '')
+        args_ast = expr.get('arguments', [])
+        
+        # Специальная трансляция для std::cout << ...
+        if "operator<<" in callee_orig or callee_orig == "<<":
+            if len(args_ast) == 2:
+                left_ast, right_ast = args_ast[0], args_ast[1]
+            elif len(args_ast) == 1:
+                right_ast = args_ast[0]
+                left_ast = expr.get('callee', {}).get('base') if expr.get('callee', {}).get('kind') == 'member_access' else None
+            else:
+                left_ast = right_ast = None
+                
+            if left_ast and right_ast:
+                left = self._generate_expression(left_ast)
+                right = self._generate_expression(right_ast)
+                if right == "endl" or "std::endl" in right:
+                    right = '"\\n"'
+                
+                if left == "cout" or left == "std::cout":
+                    return f"System.out.print({right})"
+                elif left.startswith("System.out.print("):
+                    inner = left[17:-1]
+                    return f"System.out.print({inner} + {right})" if inner else f"System.out.print({right})"
+                else:
+                    return f"{left} << {right}"
+
+        callee_str = self._generate_expression(expr.get('callee', {}))
+        args = ", ".join(self._generate_expression(arg) for arg in args_ast)
+        return f"{callee_str}({args})"
+    
+    elif kind == 'member_access':
+        base = self._generate_expression(expr['base'])
+        member = self._cpp_name_to_java_name(expr['member'])
+        # В Java всегда используется точка, даже для указателей
+        return f"{base}.{member}"
+    
+    elif kind == 'unknown_expr':
+        return expr.get('repr', '/* unknown */')
+    
+    else:
+        return f"/* {kind} */"
 
 def _cpp_literal_to_java(self, cpp_literal: str) -> str:
     """Convert C++ literal to Java equivalent"""
