@@ -1,7 +1,5 @@
-import clang.cindex
-from converter_modules.core import CppToJavaConverter
-from converter_modules.handlers import *
 import json
+from converter_modules.core import CppToJavaConverter
 
 cpp_code = """
 namespace std {

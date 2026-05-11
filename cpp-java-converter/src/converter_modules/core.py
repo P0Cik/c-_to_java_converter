@@ -1,12 +1,12 @@
 import clang.cindex
 import re
-import json
-from typing import Any, Dict, List, Optional
 import tempfile
 import logging
 import subprocess
+from typing import Any, Dict, List, Optional
 from datetime import datetime
-import time
+from .validator import CppCodeValidator
+from .java_compiler import JavaCompiler
 
 
 class CppToJavaConverter:
@@ -15,18 +15,20 @@ class CppToJavaConverter:
     Implements AST-based parsing with libclang and comprehensive transformation rules
     """
 
-    def __init__(self, mode: str = "strict", verbose: bool = False):
+    def __init__(self, mode: str = "strict", verbose: bool = False, compile_output: bool = False):
         """
         Initialize converter with specified mode
 
         Args:
             mode (str): "strict" or "flexible" conversion mode
             verbose (bool): Enable verbose logging
+            compile_output (bool): Compile generated Java code for validation
         """
 
 
         self.mode = mode
         self.verbose = verbose
+        self.compile_output = compile_output
         self.logger = logging.getLogger(__name__) if verbose else logging.getLogger()
 
         # Initialize tracking variables
@@ -39,6 +41,12 @@ class CppToJavaConverter:
         self.errors = []
         self.ast_node_count = 0
         self.last_conversion_stats = {}
+
+        # Initialize validator
+        self.validator = CppCodeValidator(mode)
+
+        # Initialize Java compiler if needed
+        self.java_compiler = JavaCompiler() if compile_output else None
 
 
     def convert(self, cpp_code: str, source_file_path: Optional[str] = None) -> str:
@@ -63,6 +71,25 @@ class CppToJavaConverter:
         self.ast_node_count = 0
 
         try:
+            # Validate C++ code before processing
+            validation_result = self.validator.validate(cpp_code)
+
+            # Add validation warnings to converter warnings
+            self.warnings.extend(validation_result['warnings'])
+
+            if not validation_result['is_valid']:
+                error_msg = "C++ code validation failed:\n" + "\n".join(validation_result['errors'])
+                self.errors.extend(validation_result['errors'])
+                if self.mode == "strict":
+                    raise ValueError(error_msg)
+                else:
+                    self.warnings.append("Validation failed but continuing in flexible mode")
+
+            # Log validation metrics
+            if self.verbose and validation_result['complexity_metrics']:
+                metrics = validation_result['complexity_metrics']
+                self.logger.info(f"Code complexity metrics: {metrics}")
+
             processed_cpp_code = self._preprocess_cpp_code(cpp_code)
 
             ast = self._parse_with_libclang(processed_cpp_code, source_file_path)
@@ -75,12 +102,33 @@ class CppToJavaConverter:
 
             full_java_code = imports_section + java_code
 
+            # Compile Java code if requested
+            compilation_result = None
+            if self.compile_output and self.java_compiler:
+                class_name = self._extract_main_class_name(java_code)
+                compilation_result = self.java_compiler.compile(full_java_code, class_name)
+
+                if not compilation_result['success']:
+                    self.errors.extend(compilation_result['errors'])
+                    self.warnings.extend(compilation_result['warnings'])
+
+                    if self.mode == "strict":
+                        raise ValueError(f"Generated Java code failed to compile:\n" + "\n".join(compilation_result['errors']))
+                    else:
+                        self.warnings.append("Generated Java code has compilation errors but continuing in flexible mode")
+                else:
+                    if self.verbose:
+                        self.logger.info(f"Java compilation successful. Generated {len(compilation_result['class_files'])} class files")
+                    self.warnings.extend(compilation_result['warnings'])
+
             # Record statistics
             self.last_conversion_stats = {
                 'ast_nodes': self.ast_node_count,
                 'warnings_count': len(self.warnings),
                 'errors_count': len(self.errors),
-                'conversion_time': datetime.now().isoformat()
+                'conversion_time': datetime.now().isoformat(),
+                'validation_metrics': validation_result['complexity_metrics'],
+                'compilation_result': compilation_result
             }
 
             return full_java_code
@@ -520,6 +568,18 @@ class CppToJavaConverter:
         from .code_generator import _cpp_literal_to_java
         return _cpp_literal_to_java(self, cpp_literal)
 
+    def _convert_macro_value_to_java(self, macro_value: str, java_type: str) -> str:
+        from .code_generator import _convert_macro_value_to_java
+        return _convert_macro_value_to_java(self, macro_value, java_type)
+
+    def _generate_java_class_template(self, template_info: Dict[str, Any]) -> str:
+        from .code_generator import _generate_java_class_template
+        return _generate_java_class_template(self, template_info)
+
+    def _generate_java_method_template(self, method_info: Dict[str, Any], class_name: str, template_params: List[Dict[str, Any]]) -> List[str]:
+        from .code_generator import _generate_java_method_template
+        return _generate_java_method_template(self, method_info, class_name, template_params)
+
 
     JAVA_RESERVED_WORDS = {
         'abstract', 'assert', 'boolean', 'break', 'byte', 'case', 'catch',
@@ -546,6 +606,17 @@ class CppToJavaConverter:
         """Generate a detailed conversion report"""
         from .helpers import generate_report
         return generate_report(self)
+
+    def _extract_main_class_name(self, java_code: str) -> str:
+        """Extract the main class name from generated Java code"""
+        import re
+        match = re.search(r'public\s+class\s+(\w+)', java_code)
+        if match:
+            return match.group(1)
+        match = re.search(r'class\s+(\w+)', java_code)
+        if match:
+            return match.group(1)
+        return "GeneratedCode"
 
 
 # Test function to demonstrate the converter

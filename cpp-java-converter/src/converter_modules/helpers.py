@@ -1,7 +1,6 @@
 import clang.cindex
-import re
-from typing import Any, Dict, List
 import time
+from typing import Any, Dict, List
 
 
 def _get_access_level(self, node) -> str:
@@ -113,8 +112,8 @@ def _convert_operator_name(self, op_name: str) -> str:
         'operator*': 'times',
         'operator/': 'dividedBy',
         'operator%': 'modulo',
-        'operator==': 'isEqualTo',          
-        'operator!=': 'isNotEqualTo',
+        'operator==': 'equals',
+        'operator!=': 'notEquals',
         'operator<': 'isLessThan',
         'operator>': 'isGreaterThan',
         'operator<=': 'isLessThanOrEqual',
@@ -131,7 +130,17 @@ def _convert_operator_name(self, op_name: str) -> str:
         'operator--': 'decrement',
         'operator=': 'assign',
         'operator[]': 'get',
-        'operator->': 'arrow'
+        'operator->': 'arrow',
+        'operator+=': 'plusAssign',
+        'operator-=': 'minusAssign',
+        'operator*=': 'timesAssign',
+        'operator/=': 'divideAssign',
+        'operator()': 'call',
+        'operator bool': 'asBoolean',
+        'operator int': 'asInt',
+        'operator double': 'asDouble',
+        'operator float': 'asFloat',
+        'operator long': 'asLong'
     }
 
     result = op_mapping.get(op_name)
@@ -139,7 +148,9 @@ def _convert_operator_name(self, op_name: str) -> str:
         return result
 
     if op_name.startswith('operator'):
-        return 'op' + op_name[8:].replace(' ', '_')
+        suffix = op_name[8:].strip()
+        if suffix:
+            return 'as' + suffix.replace(' ', '').capitalize()
 
     return op_name
 

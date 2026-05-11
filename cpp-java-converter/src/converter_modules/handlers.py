@@ -463,7 +463,15 @@ def _handle_expression(self, node) -> Dict[str, Any]:
             base = self._handle_expression(children[0])
             member = node.spelling
             return {'kind': 'member_access', 'base': base, 'member': member}
-    
+
+    # Доступ к элементу массива через []
+    elif node.kind == clang.cindex.CursorKind.ARRAY_SUBSCRIPT_EXPR:
+        children = list(node.get_children())
+        if len(children) >= 2:
+            base = self._handle_expression(children[0])
+            index = self._handle_expression(children[1])
+            return {'kind': 'array_subscript', 'base': base, 'index': index}
+
     # Указатели: *expr → expr (в Java нет разыменования)
     elif node.kind == clang.cindex.CursorKind.UNARY_OPERATOR:
         tokens = list(node.get_tokens())
@@ -601,22 +609,22 @@ def _handle_typedef(self, node) -> Dict[str, Any]:
 
 
 def _handle_macro_definition(self, node) -> Dict[str, Any]:
-
     tokens = list(node.get_tokens())
-    if len(tokens) >= 3:
-        macro_text = ' '.join([token.spelling for token in tokens[1:]])
+    if len(tokens) >= 2:
+        macro_name = tokens[0].spelling
+        macro_value = ' '.join([token.spelling for token in tokens[1:]])
 
-
-        if self._is_constant_macro(macro_text):
+        if self._is_constant_macro(macro_value):
+            java_type = self._infer_macro_type(macro_value)
             return {
                 'kind': 'macro_constant',
-                'name': node.spelling,
-                'value': macro_text.strip(),
+                'name': macro_name,
+                'value': macro_value.strip(),
+                'java_type': java_type,
                 'location': f"{node.location.file}:{node.location.line}"
             }
         else:
-
-            msg = f"Non-constant macro '{node.spelling}' detected - this cannot be directly translated to Java. Consider refactoring to const/constexpr."
+            msg = f"Non-constant macro '{macro_name}' detected - this cannot be directly translated to Java. Consider refactoring to const/constexpr."
             self.warnings.append(msg)
 
     return {
@@ -634,9 +642,47 @@ def _is_constant_macro(self, macro_text: str) -> bool:
         return True
     if text.startswith('"') and text.endswith('"'):
         return True
+    if text.startswith("'") and text.endswith("'") and len(text) >= 2:
+        return True
 
-        clean_text = text.replace('.', '').replace('_', '').replace('-', '')
-        return clean_text.isdigit()
+    clean_text = text.replace('.', '').replace('_', '').replace('-', '').replace('f', '').replace('F', '').replace('L', '').replace('l', '')
+    if clean_text.replace('x', '').replace('X', '').replace('0', '').replace('1', '').replace('2', '').replace('3', '').replace('4', '').replace('5', '').replace('6', '').replace('7', '').replace('8', '').replace('9', '').replace('a', '').replace('b', '').replace('c', '').replace('d', '').replace('e', '').replace('A', '').replace('B', '').replace('C', '').replace('D', '').replace('E', '') == '':
+        return True
+
+    return False
+
+
+def _infer_macro_type(self, macro_value: str) -> str:
+    """Infer Java type from macro value"""
+    text = macro_value.strip()
+
+    if text.lower() in ('true', 'false'):
+        return 'boolean'
+    if text.startswith('"') and text.endswith('"'):
+        return 'String'
+    if text.startswith("'") and text.endswith("'"):
+        return 'char'
+
+    if '.' in text or 'e' in text.lower():
+        if text.endswith('f') or text.endswith('F'):
+            return 'float'
+        return 'double'
+
+    if text.endswith('L') or text.endswith('l'):
+        return 'long'
+
+    if text.startswith('0x') or text.startswith('0X'):
+        return 'int'
+
+    try:
+        val = int(text.replace('_', ''))
+        if val > 2147483647 or val < -2147483648:
+            return 'long'
+        return 'int'
+    except:
+        pass
+
+    return 'int'
 
 
 def _handle_enum_declaration(self, node) -> Dict[str, Any]:

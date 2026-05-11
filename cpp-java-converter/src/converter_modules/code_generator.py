@@ -19,6 +19,8 @@ def _generate_java_code(self, java_ast: List[Any]) -> str:
             package_line = f"package {pkg_name};"
         elif elem_type == 'class':
             classes.append(self._generate_java_class(element))
+        elif elem_type == 'class_template':
+            classes.append(self._generate_java_class_template(element))
         elif elem_type == 'enum':
             enums.append(self._generate_java_enum(element))
         elif elem_type in ('function', 'function_template'):
@@ -27,14 +29,12 @@ def _generate_java_code(self, java_ast: List[Any]) -> str:
             else:
                 global_functions.append(element)
         elif elem_type == 'macro_constant':
-            java_type = self._cpp_to_java_type(element.get('underlying_type', 'int'))
+            java_type = element.get('java_type', 'int')
             java_name = self._cpp_name_to_java_name(element['name']).upper()
-            constants.append(f"public static final {java_type} {java_name} = {element['value']};")
+            java_value = self._convert_macro_value_to_java(element['value'], java_type)
+            constants.append(f"public static final {java_type} {java_name} = {java_value};")
         elif elem_type == 'variable':
             constants.append(element)
-        elif elem_type in ('class_template', 'function_template'):
-
-            other_lines.append(f"// Template '{element['name']}' not fully supported in Java")
         elif elem_type == 'typedef':
             other_lines.append(f"// typedef {element['name']} = {element['underlying_type']};")
         elif elem_type == 'conversion_operator':
@@ -624,10 +624,15 @@ def _generate_expression(self, expr: Dict[str, Any]) -> str:
         member = self._cpp_name_to_java_name(expr['member'])
         # В Java всегда используется точка, даже для указателей
         return f"{base}.{member}"
-    
+
+    elif kind == 'array_subscript':
+        base = self._generate_expression(expr.get('base', {}))
+        index = self._generate_expression(expr.get('index', {}))
+        return f"{base}[{index}]"
+
     elif kind == 'unknown_expr':
         return expr.get('repr', '/* unknown */')
-    
+
     else:
         return f"/* {kind} */"
 
@@ -642,5 +647,200 @@ def _cpp_literal_to_java(self, cpp_literal: str) -> str:
     elif cpp_literal.lower() in ('true', 'false'):
         return cpp_literal.lower()  
     else:
-        
+
         return cpp_literal
+
+
+def _convert_macro_value_to_java(self, macro_value: str, java_type: str) -> str:
+    """Convert C++ macro value to Java literal"""
+    text = macro_value.strip()
+
+    if java_type == 'boolean':
+        return text.lower()
+    elif java_type == 'String':
+        return text
+    elif java_type == 'char':
+        return text
+    elif java_type == 'float':
+        if not text.endswith('f') and not text.endswith('F'):
+            return text + 'f'
+        return text
+    elif java_type == 'long':
+        if not text.endswith('L') and not text.endswith('l'):
+            return text + 'L'
+        return text
+    else:
+        return text
+
+
+def _generate_java_class_template(self, template_info: Dict[str, Any]) -> str:
+    """Generate Java generic class from C++ class template"""
+    template_params = template_info.get('template_parameters', [])
+    class_info = template_info.get('class_info', {})
+
+    type_params = [p['name'] for p in template_params if not p.get('is_non_type', False)]
+
+    if not type_params:
+        return self._generate_java_class(class_info)
+
+    generics_clause = f"<{', '.join(type_params)}>"
+
+    java_lines = []
+    modifiers = []
+    if class_info.get('is_abstract', False):
+        modifiers.append("abstract")
+    if class_info.get('is_final', False):
+        modifiers.append("final")
+
+    extends_clause = ""
+    implements_parts = []
+
+    base_classes = class_info.get('base_classes', [])
+    if base_classes:
+        java_bases = []
+        for base in base_classes:
+            base_name = base['name']
+            java_base_name = self._cpp_name_to_java_name(base_name)
+            if len(java_bases) == 0:
+                java_bases.append(java_base_name)
+            else:
+                implements_parts.append(java_base_name)
+
+        if java_bases:
+            extends_clause = f" extends {java_bases[0]}"
+
+    has_destructor = bool(class_info.get('destructors'))
+    if has_destructor:
+        self.java_imports.add("java.lang.AutoCloseable")
+        implements_parts.append("AutoCloseable")
+
+    implements_clause = ""
+    if implements_parts:
+        implements_clause = f" implements {', '.join(implements_parts)}"
+
+    class_name = self._cpp_name_to_java_name(class_info['name'])
+    java_lines.append(f"public {''.join(modifiers + [' ']) if modifiers else ''}class {class_name}{generics_clause}{extends_clause}{implements_clause} {{")
+    java_lines.append("")
+
+    for field in class_info.get('members', []):
+        access = field.get('access', 'private')
+        java_type = self._map_template_type(field['type'], template_params)
+        java_name = self._cpp_name_to_java_name(field['name'])
+        static_keyword = "static " if field.get('is_static', False) else ""
+        final_keyword = "final " if field.get('is_const', False) else ""
+        init_value = field.get('init_value')
+        if init_value is not None:
+            java_init_value = self._cpp_literal_to_java(init_value)
+            java_lines.append(f"    {access} {static_keyword}{final_keyword}{java_type} {java_name} = {java_init_value};")
+        else:
+            java_lines.append(f"    {access} {static_keyword}{final_keyword}{java_type} {java_name};")
+
+    java_lines.append("")
+
+    for constructor in class_info.get('constructors', []):
+        params = []
+        for p in constructor.get('parameters', []):
+            param_type = self._map_template_type(p['type'], template_params)
+            param_name = self._cpp_name_to_java_name(p['name'])
+            params.append(f"{param_type} {param_name}")
+        param_str = ", ".join(params)
+
+        if constructor.get('body'):
+            body_code = self._generate_block(constructor['body'], 1)
+            java_lines.append(f"    public {class_name}({param_str}) {body_code}")
+        else:
+            java_lines.append(f"    public {class_name}({param_str}) {{")
+            java_lines.append("    }")
+        java_lines.append("")
+
+    if has_destructor:
+        java_lines.append("    @Override")
+        if class_info['destructors'][0].get('body'):
+            body_code = self._generate_block(class_info['destructors'][0]['body'], 1)
+            java_lines.append(f"    public void close() {body_code}")
+        else:
+            java_lines.append("    public void close() {")
+            java_lines.append("    }")
+        java_lines.append("")
+
+    has_equals = False
+    for method in class_info.get('methods', []):
+        method_lines = self._generate_java_method_template(method, class_name, template_params)
+
+        if any("public boolean equals(" in line for line in method_lines):
+            has_equals = True
+        java_lines.extend(method_lines)
+        java_lines.append("")
+
+    if has_equals:
+        java_lines.append("    @Override")
+        java_lines.append("    public int hashCode() {")
+        java_lines.append("        return java.util.Objects.hash(/* TODO: add fields */);")
+        java_lines.append("    }")
+        java_lines.append("")
+
+    java_lines.append("}")
+    return '\n'.join(java_lines)
+
+
+def _generate_java_method_template(self, method_info: Dict[str, Any], class_name: str, template_params: List[Dict[str, Any]]) -> List[str]:
+    """Generate Java method from C++ template method"""
+    access = method_info.get('access', 'public')
+    modifiers = [access]
+
+    if method_info.get('is_override', False):
+        modifiers.insert(0, '@Override')
+
+    if method_info.get('is_static', False):
+        modifiers.append('static')
+    if method_info.get('is_final', False):
+        modifiers.append('final')
+    if method_info.get('is_pure_virtual', False):
+        modifiers.append('abstract')
+
+    original_name = method_info['name']
+    method_name = original_name
+    is_equals = False
+
+    if original_name.startswith('operator'):
+        method_name = self._convert_operator_name(original_name)
+        if method_name == 'equals':
+            is_equals = True
+
+    if is_equals:
+        return_type = 'boolean'
+        param_str = 'Object obj'
+        if '@Override' not in modifiers:
+            modifiers.insert(0, '@Override')
+    else:
+        return_type = self._map_template_type(method_info['return_type'], template_params)
+
+        params = []
+        for param in method_info.get('parameters', []):
+            param_type = self._map_template_type(param['type'], template_params)
+            param_name = self._cpp_name_to_java_name(param['name'])
+            params.append(f"{param_type} {param_name}")
+        param_str = ", ".join(params)
+
+    java_lines = []
+
+    if is_equals and method_info.get('body') is None:
+        java_lines.append(f"    {' '.join(modifiers)} {return_type} {method_name}({param_str}) {{")
+        java_lines.append("        if (this == obj) return true;")
+        java_lines.append("        if (obj == null || getClass() != obj.getClass()) return false;")
+        java_lines.append("        // TODO: Compare relevant fields")
+        java_lines.append("        return true;")
+        java_lines.append("    }")
+    elif method_info.get('is_pure_virtual', False):
+        java_lines.append(f"    {' '.join(modifiers)} {return_type} {method_name}({param_str});")
+    else:
+        if method_info.get('body'):
+            body_code = self._generate_block(method_info['body'], 1)
+            java_lines.append(f"    {' '.join(modifiers)} {return_type} {method_name}({param_str}) {body_code}")
+        else:
+            java_lines.append(f"    {' '.join(modifiers)} {return_type} {method_name}({param_str}) {{")
+            if return_type != 'void' and return_type:
+                java_lines.append(f"        return {self._get_default_value(return_type)}; // TODO: Implement")
+            java_lines.append("    }")
+
+    return java_lines
